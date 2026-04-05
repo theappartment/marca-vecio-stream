@@ -1,0 +1,21 @@
+# Build outputs
+dist/
+release/
+
+# Runtime data
+*.pid
+*.log
+*.tmp
+
+# App runtime state
+app.log
+telegram.log
+playlist.m3u
+state.json
+config.json
+ngrok.yml
+
+# Windows / editor
+Thumbs.db
+Desktop.ini
+.vs/

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marca Vecio Stream</title>
+  <style>
+    :root { --bg:#f4f7fb; --panel:#fff; --ink:#102a43; --muted:#627d98; --accent:#0b4f6c; --ok:#eef8f7; --line:#d9e2ec; --danger:#b42318; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:"Segoe UI",Tahoma,sans-serif; color:var(--ink); background:radial-gradient(circle at top right,#d6f5ef,transparent 24%),radial-gradient(circle at left,#dbeafe,transparent 18%),var(--bg); }
+    .shell { max-width:1180px; margin:0 auto; padding:24px; }
+    .hero { background:linear-gradient(135deg,#102a43,#0f766e); color:#fff; border-radius:22px; padding:28px; margin-bottom:18px; box-shadow:0 18px 48px rgba(16,42,67,.18); }
+    .hero h1 { margin:0 0 8px; font-size:2rem; }
+    .hero p { margin:0; color:rgba(255,255,255,.86); }
+    .grid { display:grid; grid-template-columns:1.3fr .9fr; gap:18px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 10px 28px rgba(16,42,67,.06); }
+    .card h2 { margin:0 0 14px; font-size:1.1rem; }
+    .toolbar,.upload-row,.pill-row { display:flex; flex-wrap:wrap; gap:10px; }
+    .toolbar,.upload-row { margin-bottom:12px; }
+    .footer-brand { margin-top:20px; display:flex; align-items:center; justify-content:center; gap:12px; padding:16px 10px 4px; color:var(--muted); font-size:.95rem; }
+    .footer-brand strong { color:var(--ink); font-weight:700; }
+    .footer-brand img { width:44px; height:44px; object-fit:contain; border-radius:12px; background:#fff; border:1px solid var(--line); box-shadow:0 8px 20px rgba(16,42,67,.08); }
+    .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    label { display:block; font-size:.92rem; margin-bottom:6px; color:var(--muted); }
+    input[type="text"],input[type="password"],input[type="number"] { width:100%; border:1px solid var(--line); border-radius:12px; padding:11px 12px; font-size:.96rem; color:var(--ink); background:#fff; }
+    button { border:0; border-radius:12px; padding:11px 14px; font-size:.95rem; font-weight:600; background:var(--accent); color:#fff; cursor:pointer; }
+    button.secondary { background:#486581; } button.danger { background:var(--danger); } button.ghost { background:#eef2f7; color:var(--ink); }
+    .status { margin:0 0 12px; padding:12px 14px; border-radius:12px; background:var(--ok); color:#0f5132; min-height:46px; }
+    .progress-wrap { margin:0 0 14px; display:none; }
+    .progress-label { font-size:.92rem; color:var(--muted); margin-bottom:6px; }
+    .progress-bar { width:100%; height:14px; background:#e6edf5; border-radius:999px; overflow:hidden; border:1px solid var(--line); }
+    .progress-fill { width:0%; height:100%; background:linear-gradient(90deg,#0f766e,#0b4f6c); transition:width .18s ease; }
+    .file-list { display:grid; gap:10px; max-height:520px; overflow:auto; }
+    .file-item { border:1px solid var(--line); border-radius:14px; padding:12px; display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; background:#fff; }
+    .file-meta strong { display:block; margin-bottom:5px; }
+    .file-meta span { color:var(--muted); font-size:.9rem; }
+    .file-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .checkboxes { display:grid; gap:8px; margin-top:6px; margin-bottom:8px; }
+    .checkboxes label { display:flex; align-items:center; gap:8px; margin:0; color:var(--ink); }
+    .pill { background:#edf2f7; border-radius:999px; padding:8px 12px; font-size:.9rem; color:var(--ink); }
+    @media (max-width:920px) { .grid,.row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <h1>Marca Vecio Stream</h1>
+      <p>Controllo remoto del playback VLC e gestione dei video nella cartella configurata.</p>
+    </section>
+    <div class="grid">
+      <section class="card">
+        <h2>Controllo e file</h2>
+        <div id="message" class="status">Inserisci il token e premi Aggiorna.</div>
+        <div id="progressWrap" class="progress-wrap">
+          <div id="progressLabel" class="progress-label">Upload in corso...</div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </div>
+        <div class="toolbar">
+          <button id="refreshBtn">Aggiorna</button>
+          <button id="playAllBtn">Play cartella</button>
+          <button id="stopBtn" class="secondary">Stop</button>
+        </div>
+        <div class="upload-row">
+          <input id="uploadInput" type="file" accept=".mp4,.mkv,.avi,.mov,.wmv,.m4v,.webm" multiple>
+          <button id="uploadBtn">Carica file</button>
+        </div>
+        <div id="statePills" class="pill-row"></div>
+        <div id="fileList" class="file-list"></div>
+      </section>
+      <section class="card">
+        <h2>Accesso e impostazioni</h2>
+        <div>
+          <label for="tokenInput">Token remoto</label>
+          <input id="tokenInput" type="password" placeholder="Inserisci il token">
+        </div>
+        <div class="toolbar" style="margin-top:12px;">
+          <button id="saveTokenBtn" class="ghost">Salva token nel browser</button>
+        </div>
+        <div class="row">
+          <div>
+            <label for="videoFolderInput">Cartella video</label>
+            <input id="videoFolderInput" type="text">
+          </div>
+          <div>
+            <label for="vlcPathInput">Percorso VLC</label>
+            <input id="vlcPathInput" type="text">
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px;">
+          <div>
+            <label for="webPortInput">Porta web</label>
+            <input id="webPortInput" type="number" min="1024" max="65535">
+          </div>
+          <div>
+            <label for="remoteTokenInput">Nuovo token remoto</label>
+            <input id="remoteTokenInput" type="text">
+          </div>
+        </div>
+        <div class="checkboxes">
+          <label><input id="webEnabledInput" type="checkbox"> Abilita pannello web</label>
+          <label><input id="launchOnLoginInput" type="checkbox"> Avvia con Windows</label>
+          <label><input id="autoStartInput" type="checkbox"> Auto play all'avvio</label>
+          <label><input id="kioskModeInput" type="checkbox"> Modalita kiosk</label>
+        </div>
+        <div class="toolbar">
+          <button id="saveSettingsBtn">Salva impostazioni</button>
+        </div>
+      </section>
+    </div>
+    <div class="footer-brand">
+      <img src="/assets/logo" alt="The Appartment logo">
+      <div>Powered by <strong>The Appartment</strong></div>
+    </div>
+  </div>
+  <script>
+    const tokenInput = document.getElementById("tokenInput");
+    const remoteTokenInput = document.getElementById("remoteTokenInput");
+    const message = document.getElementById("message");
+    const fileList = document.getElementById("fileList");
+    const statePills = document.getElementById("statePills");
+    const progressWrap = document.getElementById("progressWrap");
+    const progressLabel = document.getElementById("progressLabel");
+    const progressFill = document.getElementById("progressFill");
+    const fields = {
+      videoFolder: document.getElementById("videoFolderInput"),
+      vlcPath: document.getElementById("vlcPathInput"),
+      webPort: document.getElementById("webPortInput"),
+      webEnabled: document.getElementById("webEnabledInput"),
+      launchOnLogin: document.getElementById("launchOnLoginInput"),
+      autoStartPlayback: document.getElementById("autoStartInput"),
+      kioskMode: document.getElementById("kioskModeInput")
+    };
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get("token") || "";
+    tokenInput.value = tokenFromQuery || localStorage.getItem("marca-vecio-token") || "";
+    if (tokenFromQuery) {
+      localStorage.setItem("marca-vecio-token", tokenFromQuery);
+    }
+    function setMessage(text, isError = false) { message.textContent = text; message.style.background = isError ? "#fdecec" : "#eef8f7"; message.style.color = isError ? "#8a1c1c" : "#0f5132"; }
+    function setUploadProgress(percent, label) {
+      progressWrap.style.display = "block";
+      progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      progressLabel.textContent = label;
+    }
+    function resetUploadProgress() {
+      progressWrap.style.display = "none";
+      progressFill.style.width = "0%";
+      progressLabel.textContent = "Upload in corso...";
+    }
+    function authHeaders() { return { "X-Auth-Token": tokenInput.value.trim() }; }
+    function formatSize(bytes) { if (!bytes && bytes !== 0) return "-"; const units = ["B","KB","MB","GB"]; let value = bytes; let idx = 0; while (value >= 1024 && idx < units.length - 1) { value /= 1024; idx += 1; } return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`; }
+    async function api(path, options = {}) { const response = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...authHeaders() } }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`); return payload; }
+    function renderState(data) {
+      const cfg = data.config || {};
+      const playback = data.playback || {};
+      fields.videoFolder.value = cfg.videoFolder || "";
+      fields.vlcPath.value = cfg.vlcPath || "";
+      fields.webPort.value = cfg.webPort || 8090;
+      fields.webEnabled.checked = !!cfg.webEnabled;
+      fields.launchOnLogin.checked = !!cfg.launchOnLogin;
+      fields.autoStartPlayback.checked = !!cfg.autoStartPlayback;
+      fields.kioskMode.checked = !!cfg.kioskMode;
+      statePills.innerHTML = "";
+      [`Playback: ${playback.isRunning ? "attivo" : "fermo"}`, `File: ${(data.files || []).length}`, `Web: ${cfg.webUrl || "-"}`, `Token: ${cfg.remoteTokenSet ? "configurato" : "mancante"}`].forEach(text => {
+        const pill = document.createElement("div"); pill.className = "pill"; pill.textContent = text; statePills.appendChild(pill);
+      });
+      fileList.innerHTML = "";
+      (data.files || []).forEach(file => {
+        const item = document.createElement("div");
+        item.className = "file-item";
+        item.innerHTML = `<div class="file-meta"><strong>${file.name}</strong><span>${formatSize(file.size)} · ${file.modifiedAt || "-"}</span></div><div class="file-actions"><button data-play="${file.name}">Play</button><button class="danger" data-delete="${file.name}">Elimina</button></div>`;
+        fileList.appendChild(item);
+      });
+    }
+    async function refresh() { try { const data = await api("/api/status"); renderState(data); setMessage("Stato aggiornato."); } catch (error) { setMessage(error.message, true); } }
+    async function playSelected(fileName) { await api("/api/play-selected", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName }) }); setMessage(`Comando inviato: ${fileName}`); setTimeout(refresh, 700); }
+    async function deleteFile(fileName) { if (!confirm(`Eliminare ${fileName}?`)) return; await api(`/api/files?name=${encodeURIComponent(fileName)}`, { method: "DELETE" }); setMessage(`File eliminato: ${fileName}`); refresh(); }
+    document.getElementById("refreshBtn").addEventListener("click", refresh);
+    document.getElementById("playAllBtn").addEventListener("click", async () => { try { await api("/api/play-all", { method: "POST" }); setMessage("Comando play cartella inviato."); setTimeout(refresh, 700); } catch (error) { setMessage(error.message, true); } });
+    document.getElementById("stopBtn").addEventListener("click", async () => { try { await api("/api/stop", { method: "POST" }); setMessage("Comando stop inviato."); setTimeout(refresh, 700); } catch (error) { setMessage(error.message, true); } });
+    document.getElementById("saveTokenBtn").addEventListener("click", () => { localStorage.setItem("marca-vecio-token", tokenInput.value.trim()); setMessage("Token salvato nel browser."); });
+    document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
+      try {
+        await api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          videoFolder: fields.videoFolder.value.trim(),
+          vlcPath: fields.vlcPath.value.trim(),
+          webPort: Number(fields.webPort.value),
+          webEnabled: fields.webEnabled.checked,
+          launchOnLogin: fields.launchOnLogin.checked,
+          autoStartPlayback: fields.autoStartPlayback.checked,
+          kioskMode: fields.kioskMode.checked,
+          remoteToken: remoteTokenInput.value.trim() || tokenInput.value.trim()
+        }) });
+        setMessage("Impostazioni salvate. Se hai cambiato token, aggiorna anche il campo token qui sopra.");
+        refresh();
+      } catch (error) { setMessage(error.message, true); }
+    });
+    document.getElementById("uploadBtn").addEventListener("click", async () => {
+      const files = Array.from(document.getElementById("uploadInput").files || []);
+      if (!files.length) { setMessage("Seleziona almeno un file da caricare.", true); return; }
+      try {
+        let completed = 0;
+        for (const file of files) {
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", `/api/upload?filename=${encodeURIComponent(file.name)}`);
+            Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
+            xhr.upload.onprogress = event => {
+              if (!event.lengthComputable) return;
+              const filePercent = (event.loaded / event.total) * 100;
+              const totalPercent = ((completed + (filePercent / 100)) / files.length) * 100;
+              setUploadProgress(totalPercent, `Caricamento ${file.name} (${Math.round(filePercent)}%)`);
+            };
+            xhr.onload = () => {
+              let payload = {};
+              try { payload = JSON.parse(xhr.responseText || "{}"); } catch (_) {}
+              if (xhr.status >= 200 && xhr.status < 300) {
+                completed += 1;
+                setUploadProgress((completed / files.length) * 100, `Caricato ${file.name}`);
+                resolve();
+              } else {
+                reject(new Error(payload.error || `Upload fallito per ${file.name}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error(`Errore di rete durante upload di ${file.name}`));
+            xhr.send(file);
+          });
+        }
+        setMessage("Upload completato."); document.getElementById("uploadInput").value = ""; refresh();
+      } catch (error) { setMessage(error.message, true); }
+      finally { setTimeout(resetUploadProgress, 600); }
+    });
+    fileList.addEventListener("click", async event => { const play = event.target.getAttribute("data-play"); const del = event.target.getAttribute("data-delete"); try { if (play) await playSelected(play); if (del) await deleteFile(del); } catch (error) { setMessage(error.message, true); } });
+    refresh();
+  </script>
+</body>
+</html>
