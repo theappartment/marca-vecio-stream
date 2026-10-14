@@ -24,7 +24,7 @@ foreach ($name in @('VideoListBox','VideoCountText','PriorityFrequencyCombo','Gl
     Set-Variable -Name $variableName -Value $control
 }
 $script:UpdatingContentUi = $false
-foreach ($name in @('Get-ContentPreviewBitmap','Refresh-VideoList','Show-ContentSelection','Update-Status')) {
+foreach ($name in @('Get-ContentPreviewBitmap','New-ContentRow','Refresh-VideoList','Show-ContentSelection','Update-Status')) {
     $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name },$true)
     Invoke-Expression $function.Extent.Text
 }
@@ -32,13 +32,36 @@ try {
     if ($uploadCategoryCombo.SelectedIndex -ne 0) { throw 'Default upload category is not normal loop.' }
     Add-Type -AssemblyName System.Drawing
     $image = New-Object Drawing.Bitmap(32,20)
-    try { $image.Save((Join-Path $folder 'Slide.png'),[Drawing.Imaging.ImageFormat]::Png) } finally { $image.Dispose() }
+    $graphics = [Drawing.Graphics]::FromImage($image)
+    try { $graphics.Clear([Drawing.Color]::Red); $image.Save((Join-Path $folder 'Slide.png'),[Drawing.Imaging.ImageFormat]::Png) }
+    finally { $graphics.Dispose(); $image.Dispose() }
     $videoFolderTextBox.Text = $folder
     Refresh-VideoList
     if ($videoListBox.Items.Count -ne 1) { throw 'WPF content list empty.' }
     $videoListBox.SelectedIndex = 0
     Show-ContentSelection
     if (-not $slidePreview.Source -or -not $contentPriorityCheckBox.IsEnabled -or $contentDurationTextBox.Text -ne '10') { throw 'WPF slide controls or thumbnail failed.' }
+    # Check the realized template and actual pixels, not just the backing data.
+    # An unshown Window suppresses rendering, so detach the root for this test.
+    $root = $window.Content; $window.Content = $null
+    $root.Measure([Windows.Size]::new(1400,1000))
+    $root.Arrange([Windows.Rect]::new(0,0,1400,1000)); $root.UpdateLayout()
+    function Get-PreviewImages($Node) {
+        if ($Node -is [Windows.Controls.Image]) { $Node }
+        for ($i=0; $i -lt [Windows.Media.VisualTreeHelper]::GetChildrenCount($Node); $i++) {
+            Get-PreviewImages ([Windows.Media.VisualTreeHelper]::GetChild($Node,$i))
+        }
+    }
+    $rowImage = @(Get-PreviewImages $root | Where-Object { $_.Name -eq '' })[0]
+    if (-not $rowImage.Source -or $rowImage.ActualWidth -le 0) { throw 'Real list row did not bind thumbnail to its Image control.' }
+    $render = [Windows.Media.Imaging.RenderTargetBitmap]::new(1400,1000,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+    $render.Render($root)
+    foreach ($control in @($rowImage,$slidePreview)) {
+        $point=$control.TranslatePoint([Windows.Point]::new($control.ActualWidth/2,$control.ActualHeight/2),$root)
+        $pixel=New-Object byte[] 4
+        $render.CopyPixels([Windows.Int32Rect]::new([int]$point.X,[int]$point.Y,1,1),$pixel,4,0)
+        if ($pixel[2] -lt 245 -or $pixel[0] -gt 10 -or $pixel[3] -ne 255) { throw 'Visible preview must render red pixels, not a black placeholder.' }
+    }
     $changes = [pscustomobject]@{ enabled = $true }
     $changes | Add-Member priority $true
     $changes | Add-Member durationSeconds 4

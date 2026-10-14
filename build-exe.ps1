@@ -47,7 +47,7 @@ $meta = @{
     company     = "The Appartment"
     product     = "Marca Vecio Stream"
     copyright   = "The Appartment"
-    version     = "1.3.1.0"
+    version     = "1.3.2.0"
 }
 
 Invoke-ps2exe -inputFile (Join-Path $compileRoot "MarcaVecioPlayer.ps1") `

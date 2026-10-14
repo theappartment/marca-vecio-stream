@@ -44,3 +44,5 @@ Versione 1.2.7: verificati recupero della dissolvenza e nove combinazioni foto/v
 Versione 1.3.0: test ricerca solo manuale (avvio e timer inattivo senza richieste), confronto versioni, release incomplete, SHA256, download interrotto, sostituzione atomica e controlli WPF superati. DPAPI non disponibile nell'account non interattivo di questa sessione: verifica accesso cifrato e consenso UAC da completare sul desktop dell'utente.
 
 Versione 1.3.1: updater rimosso completamente; nuova prova con Defender sul PC dell'utente necessaria. Non sono state modificate le protezioni antivirus.
+
+Versione 1.3.2: test WPF esteso al rendering effettivo dei pixel delle anteprime (lista e selezione), non soltanto alla presenza di BitmapImage nei dati. Riprodotto controllo Image.Source nullo nella lista e verificata correzione con righe .NET tipizzate. Foto reale verificata nel programma compilato; MP4 reale, cache, aggiornamenti e file non bloccati verificati.

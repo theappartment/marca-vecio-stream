@@ -1,6 +1,6 @@
 # Installazione, aggiornamenti e rollback
 
-Versione corrente: 1.3.1, senza updater. Non contiene ricerca release, download installer, pulsanti aggiornamento o worker GitHub. Per aggiornare, scarica ed esegui manualmente il setup, usando la stessa destinazione.
+Versione corrente: 1.3.2, senza updater. Non contiene ricerca release, download installer, pulsanti aggiornamento o worker GitHub. Per aggiornare, scarica ed esegui manualmente il setup, usando la stessa destinazione.
 
 La rimozione serve a verificare se l'updater contribuisce al blocco Defender Trojan:Win32/Powbr.A!MTB rilevato sulla 1.3.0. Non costituisce una conferma di falso positivo o di risoluzione: la prova deve essere svolta con Defender attivo. Nessuna protezione antivirus viene modificata.
 

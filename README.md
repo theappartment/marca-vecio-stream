@@ -1,6 +1,6 @@
 # Marca Vecio Stream
 
-Applicazione Windows per gestire slide JPG/PNG, video e composizioni reel in una rotazione fullscreen con VLC, dall'app o dal pannello web remoto. Versione 1.3.1.
+Applicazione Windows per gestire slide JPG/PNG, video e composizioni reel in una rotazione fullscreen con VLC, dall'app o dal pannello web remoto. Versione 1.3.2.
 
 L'installer arresta automaticamente l'app e i suoi processi ausiliari nella cartella di installazione prima di sostituire i file. Alla chiusura dell'app vengono fermati anche i processi ausiliari gia presenti e riutilizzati all'avvio. Configurazione e contenuti vengono conservati durante l'aggiornamento.
 
@@ -51,7 +51,7 @@ I video esistenti vengono riconosciuti automaticamente come attivi, in ordine al
 
 ## Installazione e aggiornamenti
 
-La versione 1.3.1 rimuove completamente l'updater introdotto nella 1.3.0, per confrontare il comportamento con Defender attivo. Gli aggiornamenti si installano manualmente dal setup. La rimozione non conferma che l'updater fosse la causa della segnalazione antivirus. Foto, video e impostazioni vengono conservati. Vedi [aggiornamenti e rollback](docs/UPDATES.md).
+La versione 1.3.2 rimuove completamente l'updater introdotto nella 1.3.0, per confrontare il comportamento con Defender attivo. Gli aggiornamenti si installano manualmente dal setup. La rimozione non conferma che l'updater fosse la causa della segnalazione antivirus. Foto, video e impostazioni vengono conservati. Vedi [aggiornamenti e rollback](docs/UPDATES.md).
 
 ## Funzioni principali
 

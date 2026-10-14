@@ -690,23 +690,60 @@ function Get-ContentPreviewBitmap($Item) {
     $previewPath = if ($Item.kind -in @('slide','background')) { $Item.fullName } else { Get-MediaPreview $Item.fullName $vlcPathTextBox.Text }
     $bitmap = New-Object Windows.Media.Imaging.BitmapImage
     $bitmap.BeginInit(); $bitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-    $bitmap.CreateOptions = [Windows.Media.Imaging.BitmapCreateOptions]::IgnoreImageCache
-    $bitmap.UriSource = New-Object uri($previewPath); $bitmap.DecodePixelWidth = 280
-    $bitmap.EndInit(); $bitmap.Freeze()
+    $stream = [IO.File]::Open($previewPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try {
+        $bitmap.StreamSource = $stream; $bitmap.DecodePixelWidth = 280
+        $bitmap.EndInit(); $bitmap.Freeze()
+    } finally { $stream.Dispose() }
     $script:ContentPreviewCache[$key] = $bitmap
     return $bitmap
+}
+
+function New-ContentRow($Item,$Bitmap,[string]$PreviewStatus) {
+    if (-not ('MarcaVecio.ContentRow' -as [type])) {
+        # Real CLR properties keep WPF bindings independent of PowerShell's
+        # descriptors for properties attached later with Add-Member.
+        Add-Type -ReferencedAssemblies PresentationCore,WindowsBase -TypeDefinition @'
+namespace MarcaVecio {
+    public sealed class ContentRow {
+        public string name {get;set;}
+        public string role {get;set;}
+        public string kind {get;set;}
+        public bool enabled {get;set;}
+        public bool priority {get;set;}
+        public int durationSeconds {get;set;}
+        public bool pendingDelete {get;set;}
+        public int order {get;set;}
+        public long size {get;set;}
+        public string modifiedAt {get;set;}
+        public long modifiedTicks {get;set;}
+        public string fullName {get;set;}
+        public System.Windows.Media.Imaging.BitmapSource previewBitmap {get;set;}
+        public string previewStatus {get;set;}
+    }
+}
+'@
+    }
+    $row = New-Object MarcaVecio.ContentRow
+    foreach ($name in @('name','role','kind','enabled','priority','durationSeconds','pendingDelete','order','size','modifiedAt','modifiedTicks','fullName')) {
+        $row.$name = $Item.$name
+    }
+    $row.previewBitmap = $Bitmap; $row.previewStatus = $PreviewStatus
+    return $row
 }
 
 function Refresh-VideoList {
     if (-not [IO.Directory]::Exists($videoFolderTextBox.Text)) { $videoListBox.ItemsSource = @(); return }
     $view = Get-MediaView $videoFolderTextBox.Text
-    $items = @($view.items)
-    foreach ($item in $items) {
+    $items = @(foreach ($item in $view.items) {
         $bitmap = $null; $previewStatus = ''
-        try { if (-not $item.pendingDelete) { $bitmap = Get-ContentPreviewBitmap $item } } catch { $previewStatus = 'Anteprima non disponibile' }
-        $item | Add-Member previewBitmap $bitmap -Force
-        $item | Add-Member previewStatus $previewStatus -Force
-    }
+        try { if (-not $item.pendingDelete) { $bitmap = Get-ContentPreviewBitmap $item } }
+        catch {
+            $previewStatus = 'Anteprima non disponibile'
+            Write-AppLog ('Anteprima non disponibile per '+$item.name+': '+$_.Exception.Message)
+        }
+        New-ContentRow $item $bitmap $previewStatus
+    })
     $selectedName = if ($videoListBox.SelectedItem) { $videoListBox.SelectedItem.name } else { '' }
     $videoListBox.ItemsSource = $null
     $videoListBox.ItemsSource = $items

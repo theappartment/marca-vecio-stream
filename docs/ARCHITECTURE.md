@@ -125,3 +125,5 @@ Versione 1.2.7: animazioni DWM disabilitate sulla finestra della dissolvenza pri
 Versione 1.3.0: UpdateClient condiviso da app e UpdateWorker compilato. UpdateUi avvia il worker esclusivamente dai pulsanti, controlla soltanto il risultato del lavoro richiesto e avvia Inno Setup dopo verifica. Token privato separato con DPAPI per utente; nessuna ricerca all'avvio o periodica.
 
 Versione 1.3.1: rimosso updater runtime e worker; installer elimina i file residui. Pubblicazione release GitHub mantenuta per installazione manuale.
+
+Versione 1.3.2: ContentRow espone proprieta CLR per le associazioni WPF, inclusa BitmapSource. Miniature caricate OnLoad da stream e congelate, con chiusura immediata del file. Errori anteprima registrati nel log dell'app.
