@@ -71,3 +71,14 @@ jobs:
           if (-not (Test-Path $notes)) {throw 'Release notes missing'}
           gh release create "v$env:RELEASE_VERSION" release/MarcaVecioStream-Setup.exe release/MarcaVecioStream-Documentazione.zip release/SHA256SUMS.txt --target $env:GITHUB_SHA --title "Marca Vecio Stream v$env:RELEASE_VERSION" --notes-file $notes
           if ($LASTEXITCODE -ne 0) {throw 'Release publication failed'}
+      - name: Verify private release download with the updater
+        env:
+          UPDATE_TEST_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          . ./src/UpdateClient.ps1
+          $release=Get-LatestUpdate $env:UPDATE_TEST_TOKEN '0.0.0'
+          if (-not $release.available -or $release.version -ne '${{ steps.version.outputs.version }}') {throw 'Update feed mismatch'}
+          $package=Save-UpdatePackage $release (Join-Path $env:RUNNER_TEMP 'update-verification') $env:UPDATE_TEST_TOKEN
+          Assert-UpdatePackage $package $release
+          Write-Output 'PASS: authenticated private GitHub download, redirects, size and SHA256 using the real updater.'
