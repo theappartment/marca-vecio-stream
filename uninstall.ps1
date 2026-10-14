@@ -63,6 +63,7 @@ function Stop-AppProcessesByPath {
         (Join-Path $installRoot "MarcaVecioStream.exe"),
         (Join-Path $installRoot "WebServer.exe"),
         (Join-Path $installRoot "TelegramWorker.exe"),
+        (Join-Path $installRoot "UpdateWorker.exe"),
         (Join-Path $installRoot "tools\ngrok\ngrok.exe")
     )
 
@@ -82,6 +83,7 @@ function Stop-AppProcessesByExecutablePath {
         (Join-Path $installRoot "MarcaVecioStream.exe"),
         (Join-Path $installRoot "WebServer.exe"),
         (Join-Path $installRoot "TelegramWorker.exe"),
+        (Join-Path $installRoot "UpdateWorker.exe"),
         (Join-Path $installRoot "tools\ngrok\ngrok.exe")
     )
 

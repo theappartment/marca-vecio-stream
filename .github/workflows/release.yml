@@ -1,0 +1,73 @@
+name: Build Windows release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine version and preserve published releases
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $source=[IO.File]::ReadAllText((Join-Path $PWD 'src/UpdateClient.ps1'))
+          $version=[regex]::Match($source,"AppVersion = '([0-9.]+)'").Groups[1].Value
+          if (-not $version) {throw 'Version missing'}
+          $releases=gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) {throw 'Cannot read releases'}
+          $exists=@($releases | Where-Object {$_.tag_name -in @($version,"v$version")}).Count -gt 0
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "build=$(-not $exists)" >> $env:GITHUB_OUTPUT
+      - name: Prepare build tools
+        if: steps.version.outputs.build == 'True'
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module ps2exe -RequiredVersion 1.0.18 -Scope CurrentUser -Force
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) {throw 'Inno Setup installation failed'}
+          New-Item -ItemType Directory -Force src/tools/ngrok | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip' -OutFile "$env:RUNNER_TEMP/ngrok.zip"
+          Expand-Archive "$env:RUNNER_TEMP/ngrok.zip" src/tools/ngrok -Force
+      - name: Verify catalog, updater and desktop
+        if: steps.version.outputs.build == 'True'
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach ($test in @('Test-Media','Test-MixedRotation','Test-Updater','Test-Update','Test-WindowsUi')) {
+            powershell -NoProfile -STA -ExecutionPolicy Bypass -File "tests/$test.ps1"
+            if ($LASTEXITCODE -ne 0) {throw "Failed: $test"}
+          }
+          node tests/test-web.cjs
+          if ($LASTEXITCODE -ne 0) {throw 'Web test failed'}
+      - name: Build installer and documentation
+        if: steps.version.outputs.build == 'True'
+        run: |
+          $ErrorActionPreference='Stop'
+          ./build-exe.ps1
+          ./build-setup.ps1
+          Compress-Archive -Path README.md,docs -DestinationPath release/MarcaVecioStream-Documentazione.zip
+          $hash=(Get-FileHash release/MarcaVecioStream-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  MarcaVecioStream-Setup.exe" | Set-Content release/SHA256SUMS.txt -Encoding ascii
+      - name: Publish new version without replacing old releases
+        if: steps.version.outputs.build == 'True'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $notes="docs/releases/v$env:RELEASE_VERSION.md"
+          if (-not (Test-Path $notes)) {throw 'Release notes missing'}
+          gh release create "v$env:RELEASE_VERSION" release/MarcaVecioStream-Setup.exe release/MarcaVecioStream-Documentazione.zip release/SHA256SUMS.txt --target $env:GITHUB_SHA --title "Marca Vecio Stream v$env:RELEASE_VERSION" --notes-file $notes
+          if ($LASTEXITCODE -ne 0) {throw 'Release publication failed'}

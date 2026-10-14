@@ -1,6 +1,8 @@
 # Build outputs
 dist/
 release/
+.build-tools/
+.test-*/
 
 # Runtime data
 *.pid
@@ -19,3 +21,8 @@ ngrok.yml
 Thumbs.db
 Desktop.ini
 .vs/
+
+src/tools/
+*.credential
+update-result-*.json
+

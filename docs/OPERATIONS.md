@@ -13,7 +13,7 @@ Installazione prevista:
 ## Primo avvio
 
 1. Apri l'app.
-2. Seleziona la cartella video.
+2. Seleziona la cartella contenuti (slide e video).
 3. Verifica il percorso di `vlc.exe`.
 4. Salva.
 5. Se vuoi accesso remoto, verifica:
@@ -22,6 +22,18 @@ Installazione prevista:
    - token remoto del pannello web
 
 ## Test funzionali consigliati
+
+### Gestione slide
+
+- caricare piu immagini JPG/PNG dall'app e dal pannello remoto
+- controllare le anteprime, durata iniziale 10 secondi e durata personalizzata
+- segnare slide prioritarie e scegliere frequenza da 2 a 5
+- riordinare e attivare/disattivare contenuti
+- modificare durante la riproduzione: il contenuto corrente deve terminare
+- eliminare la slide corrente e controllare la rimozione dopo il termine
+- disattivare tutto e verificare l'arresto con messaggio
+- riavviare l'app e verificare persistenza
+- mostrare slide verticali/orizzontali e MP4 sullo schermo del locale, controllando proporzioni, audio e passaggi
 
 ### Desktop
 

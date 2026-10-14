@@ -8,7 +8,7 @@ Marca Vecio Stream
 
 Applicazione Windows per:
 
-- gestire playback video locale tramite VLC
+- gestire slide JPG/PNG e video locali tramite VLC
 - riprodurre contenuti in full screen e loop
 - controllare l'app da interfaccia desktop
 - controllare l'app da pannello web locale/remoto
@@ -32,6 +32,12 @@ Applicazione Windows per:
   Build del setup `.exe`.
 
 ## Funzionalita implementate
+
+- slide con durata 1-300 secondi e anteprime nei due pannelli
+- priorita manuale con frequenza globale 2-5 apparizioni per giro
+- ordine e attivazione per contenuto, cataloghi persistenti per cartella
+- aggiornamento automatico ai confini tra contenuti senza riavvio VLC
+- upload atomici, rifiuto dei duplicati, eliminazioni differite
 
 - selezione cartella video
 - selezione percorso VLC

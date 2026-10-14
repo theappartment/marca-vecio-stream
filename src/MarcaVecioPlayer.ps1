@@ -39,14 +39,20 @@ $TelegramPidPath = Join-Path $ConfigRoot "telegram.pid"
 $NgrokPidPath = Join-Path $ConfigRoot "ngrok.pid"
 $NgrokConfigPath = Join-Path $ConfigRoot "ngrok.yml"
 $SupportedExtensions = @(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".webm")
-$DefaultTelegramBotToken = "8759940162:AAG3xV-dCYhXqGt-Rc-mYvhE8JCdxcaCF94"
-$DefaultNgrokAuthtoken = "3BtfwEuyn8RUwoYQsN3GmrKgd4w_23EAfyFnAuAgw391HMXgk"
+$DefaultTelegramBotToken = ""
+$DefaultNgrokAuthtoken = ""
 $DefaultNgrokDownloadUrl = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
 $DefaultNgrokInstallRoot = Join-Path $AppRoot "tools\ngrok"
 $FallbackNgrokInstallRoot = Join-Path $env:LOCALAPPDATA "MarcaVecioStream\tools\ngrok"
 $AppIconPath = Join-Path (Split-Path -Parent $AppRoot) "logoapp.ico"
 $AppImagePath = Join-Path (Split-Path -Parent $AppRoot) "logoapp.png.jpg"
 $script:CurrentVlcProcess = $null
+$script:ApplicationClosing = $false
+. (Join-Path $AppRoot 'MediaCatalog.ps1')
+. (Join-Path $AppRoot 'PlaybackSurface.ps1')
+. (Join-Path $AppRoot 'PlaybackController.ps1')
+. (Join-Path $AppRoot 'UpdateClient.ps1')
+. (Join-Path $AppRoot 'UpdateUi.ps1')
 $script:ConfigWriteStamp = ""
 $script:WebServerOwnedPid = $null
 $script:TelegramWorkerOwnedPid = $null
@@ -268,60 +274,23 @@ function Save-Config($Config) {
 }
 
 function Get-VideoFiles([string]$FolderPath) {
-    if ([string]::IsNullOrWhiteSpace($FolderPath) -or -not (Test-Path -LiteralPath $FolderPath)) {
-        return @()
-    }
-
-    return @(Get-ChildItem -LiteralPath $FolderPath -File |
-        Where-Object { $SupportedExtensions -contains $_.Extension.ToLowerInvariant() } |
-        Sort-Object Name)
-}
-
-function Build-PlaylistFromEntries([string[]]$Entries) {
-    $lines = @("#EXTM3U")
-    foreach ($entry in $Entries) {
-        $lines += $entry
-    }
-    Set-Content -LiteralPath $PlaylistPath -Value $lines -Encoding UTF8
-    return $PlaylistPath
+    return @(Get-MediaFiles $FolderPath)
 }
 
 function Stop-Playback {
-    if ($script:CurrentVlcProcess -and -not $script:CurrentVlcProcess.HasExited) {
-        try {
-            $script:CurrentVlcProcess.CloseMainWindow() | Out-Null
-            Start-Sleep -Milliseconds 400
-            if (-not $script:CurrentVlcProcess.HasExited) {
-                Stop-Process -Id $script:CurrentVlcProcess.Id -Force
-            }
-        }
-        catch {
-        }
-    }
-
-    $script:CurrentVlcProcess = $null
+    Stop-ControlledPlayback
+    Update-Status 'Playback fermato.'
 }
 
-function Start-VlcPlayback([string]$VlcPath, [string]$TargetPath) {
-    Stop-Playback
-
-    $arguments = @(
-        "--fullscreen"
-        "--video-on-top"
-        "--loop"
-        "--no-video-title-show"
-        "--qt-start-minimized"
-        $TargetPath
-    )
-
-    if (-not $TargetPath.ToLowerInvariant().EndsWith(".m3u")) {
-        $arguments += "--play-and-exit"
-    }
-    else {
-        $arguments += "--playlist-autostart"
-    }
-
-    $script:CurrentVlcProcess = Start-Process -FilePath $VlcPath -ArgumentList $arguments -PassThru
+function Show-ConfigurationWindow {
+    if ($script:ApplicationClosing) { return }
+    if ($window.WindowState -eq [Windows.WindowState]::Minimized) { $window.WindowState = [Windows.WindowState]::Normal }
+    if (-not $window.IsVisible) { $window.Show() }
+    $window.Activate() | Out-Null
+    $window.Focus() | Out-Null
+    $hwnd = (New-Object Windows.Interop.WindowInteropHelper($window)).EnsureHandle()
+    [MarcaVecio.PlaybackKeyboard]::BringToForeground($hwnd)
+    Write-StateFile
 }
 
 function Update-Status([string]$Message) {
@@ -345,7 +314,7 @@ function Ensure-ValidLocalVideoSetup {
     $videoFolder = $videoFolderTextBox.Text.Trim()
 
     if ([string]::IsNullOrWhiteSpace($videoFolder) -or -not (Test-Path -LiteralPath $videoFolder)) {
-        throw "Seleziona una cartella video valida."
+        throw "Seleziona una cartella contenuti valida."
     }
 
     $setup.videoFolder = $videoFolder
@@ -354,25 +323,22 @@ function Ensure-ValidLocalVideoSetup {
 
 function Start-PlaySelected([string]$FileName) {
     $setup = Ensure-ValidLocalVideoSetup
-    $target = Get-VideoFiles -FolderPath $setup.videoFolder | Where-Object { $_.Name -eq $FileName } | Select-Object -First 1
+    $target = (Get-MediaView $setup.videoFolder).items | Where-Object { $_.Name -eq $FileName -and $_.enabled -and -not $_.pendingDelete } | Select-Object -First 1
     if (-not $target) {
-        throw "Video non trovato: $FileName"
+        throw "Contenuto non trovato o disattivato: $FileName"
     }
-
-    Start-VlcPlayback -VlcPath $setup.vlcPath -TargetPath $target.FullName
-    Update-Status "Riproduzione avviata: $($target.Name)"
+    Start-ControlledPlayback $setup.vlcPath $setup.videoFolder $FileName
 }
 
 function Start-PlayAll {
     $setup = Ensure-ValidLocalVideoSetup
-    $items = @(Get-VideoFiles -FolderPath $setup.videoFolder)
+    $items = @((Get-MediaView $setup.videoFolder).items | Where-Object { $_.enabled -and -not $_.pendingDelete })
     if ($items.Count -eq 0) {
-        throw "Nella cartella non ci sono video compatibili."
+        Stop-Playback
+        Set-PlaybackNotice 'Rotazione fermata: nessun contenuto attivo.'
+        return
     }
-
-    $playlist = Build-PlaylistFromEntries -Entries @($items | ForEach-Object { $_.FullName })
-    Start-VlcPlayback -VlcPath $setup.vlcPath -TargetPath $playlist
-    Update-Status "Playback cartella avviato in loop."
+    Start-ControlledPlayback $setup.vlcPath $setup.videoFolder
 }
 
 function Get-StartupShortcutPath {
@@ -386,7 +352,8 @@ function Configure-LaunchOnLogin([bool]$Enabled) {
         $launcherPath = Join-Path $AppRoot "launcher.vbs"
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $launcherPath
+        $exePath = Join-Path $AppRoot 'MarcaVecioStream.exe'
+        $shortcut.TargetPath = $(if ([IO.File]::Exists($exePath)) { $exePath } else { $launcherPath })
         $shortcut.WorkingDirectory = $AppRoot
         $shortcut.Save()
     }
@@ -427,6 +394,17 @@ function Stop-WebServerProcess {
     }
 }
 
+function Test-HelperProcess($Process, [string]$ExecutablePath, [string]$ScriptPath) {
+    try {
+        if ($Process.Path -and $Process.Path.Equals($ExecutablePath,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ($Process.ProcessName -in @('powershell','pwsh')) {
+            $details = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $Process.Id) -ErrorAction Stop
+            return ($details.CommandLine -and $details.CommandLine.IndexOf(('"' + $ScriptPath + '"'),[StringComparison]::OrdinalIgnoreCase) -ge 0)
+        }
+    } catch { }
+    return $false
+}
+
 function Start-WebServerProcess {
     $config = Get-CurrentConfigFromUi
     if (-not $config.webEnabled) {
@@ -438,7 +416,8 @@ function Start-WebServerProcess {
     if ($existingPid) {
         try {
             $existing = Get-Process -Id $existingPid -ErrorAction Stop
-            if (-not $existing.HasExited) {
+            if (-not $existing.HasExited -and (Test-HelperProcess $existing (Join-Path $AppRoot 'WebServer.exe') (Join-Path $AppRoot 'WebServer.ps1'))) {
+                $script:WebServerOwnedPid = $existingPid
                 return
             }
         }
@@ -540,7 +519,8 @@ function Start-NgrokProcess {
     if ($existingPid) {
         try {
             $existing = Get-Process -Id $existingPid -ErrorAction Stop
-            if (-not $existing.HasExited) {
+            if (-not $existing.HasExited -and (Test-HelperProcess $existing $config.ngrokPath '')) {
+                $script:NgrokOwnedPid = $existingPid
                 return
             }
         }
@@ -598,7 +578,8 @@ function Start-TelegramWorkerProcess {
     if ($existingPid) {
         try {
             $existing = Get-Process -Id $existingPid -ErrorAction Stop
-            if (-not $existing.HasExited) {
+            if (-not $existing.HasExited -and (Test-HelperProcess $existing (Join-Path $AppRoot 'TelegramWorker.exe') (Join-Path $AppRoot 'TelegramWorker.ps1'))) {
+                $script:TelegramWorkerOwnedPid = $existingPid
                 return
             }
         }
@@ -704,31 +685,53 @@ function Install-NgrokBinary {
     }
 }
 
+function Get-ContentPreviewBitmap($Item) {
+    if (-not (Get-Variable ContentPreviewCache -Scope Script -ErrorAction SilentlyContinue)) { $script:ContentPreviewCache = @{} }
+    $key = $Item.fullName+'|'+$Item.modifiedTicks+'|'+$Item.size
+    if ($script:ContentPreviewCache.ContainsKey($key)) { return $script:ContentPreviewCache[$key] }
+    $previewPath = if ($Item.kind -in @('slide','background')) { $Item.fullName } else { Get-MediaPreview $Item.fullName $vlcPathTextBox.Text }
+    $bitmap = New-Object Windows.Media.Imaging.BitmapImage
+    $bitmap.BeginInit(); $bitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bitmap.CreateOptions = [Windows.Media.Imaging.BitmapCreateOptions]::IgnoreImageCache
+    $bitmap.UriSource = New-Object uri($previewPath); $bitmap.DecodePixelWidth = 280
+    $bitmap.EndInit(); $bitmap.Freeze()
+    $script:ContentPreviewCache[$key] = $bitmap
+    return $bitmap
+}
+
 function Refresh-VideoList {
-    $items = @(Get-VideoFiles -FolderPath $videoFolderTextBox.Text)
+    if (-not [IO.Directory]::Exists($videoFolderTextBox.Text)) { $videoListBox.ItemsSource = @(); return }
+    $view = Get-MediaView $videoFolderTextBox.Text
+    $items = @($view.items)
+    foreach ($item in $items) {
+        $bitmap = $null; $previewStatus = ''
+        try { if (-not $item.pendingDelete) { $bitmap = Get-ContentPreviewBitmap $item } } catch { $previewStatus = 'Anteprima non disponibile' }
+        $item | Add-Member previewBitmap $bitmap -Force
+        $item | Add-Member previewStatus $previewStatus -Force
+    }
+    $selectedName = if ($videoListBox.SelectedItem) { $videoListBox.SelectedItem.name } else { '' }
     $videoListBox.ItemsSource = $null
     $videoListBox.ItemsSource = $items
-    $videoCountText.Text = "Video trovati: $($items.Count)"
+    $videoListBox.SelectedItem = $items | Where-Object { $_.name -eq $selectedName } | Select-Object -First 1
+    $videoCountText.Text = "Contenuti: $($items.Count) - Le modifiche entrano al prossimo contenuto."
+    $script:UpdatingContentUi = $true
+    $priorityFrequencyCombo.SelectedIndex = $view.priorityFrequency - 2
+    if (-not $globalSlideDurationTextBox.IsKeyboardFocusWithin) { $globalSlideDurationTextBox.Text = [string]$view.slideDurationSeconds }
+    $script:UpdatingContentUi = $false
 }
 
 function Get-PlaybackState {
-    $isRunning = $false
-    $processId = $null
-
-    if ($script:CurrentVlcProcess) {
-        try {
-            $isRunning = -not $script:CurrentVlcProcess.HasExited
-            if ($isRunning) {
-                $processId = $script:CurrentVlcProcess.Id
-            }
-        }
-        catch {
-        }
-    }
+    $isRunning = ($script:PlaybackMode -ne 'stopped' -and $null -ne $script:PlaybackSurface)
+    $processId = if ($isRunning) { [Diagnostics.Process]::GetCurrentProcess().Id } else { $null }
 
     return [ordered]@{
-        isRunning = $isRunning
+        isRunning = ($isRunning -and $script:PlaybackMode -ne 'stopped')
         processId = $processId
+        mode = $script:PlaybackMode
+        currentName = $(if ($script:PlaybackCurrent) { $script:PlaybackCurrent.name } else { '' })
+        message = $script:PlaybackMessage
+        error = $script:PlaybackError
+        pendingChanges = ($script:PlaybackMode -ne 'stopped' -and $script:PlaybackSignature -ne $script:PlaybackAppliedSignature)
     }
 }
 
@@ -789,7 +792,7 @@ function Save-CurrentConfigFromUi {
 
 function Write-StateFile {
     $config = Get-CurrentConfigFromUi
-    $items = Get-VideoFiles -FolderPath $config.videoFolder
+    $view = if ([IO.Directory]::Exists($config.videoFolder)) { Get-MediaView $config.videoFolder } else { [pscustomobject]@{ priorityFrequency = 2; slideDurationSeconds = 10; items = @() } }
     $payload = [ordered]@{
         generatedAt = (Get-Date).ToString("s")
         appName     = $AppName
@@ -810,11 +813,19 @@ function Write-StateFile {
             ngrokInstalled    = (Test-Path -LiteralPath $config.ngrokPath)
             ngrokPublicUrl    = (Get-NgrokPublicUrl -Port $config.webPort)
         }
-        files = @($items | ForEach-Object {
+        priorityFrequency = $view.priorityFrequency
+        slideDurationSeconds = $view.slideDurationSeconds
+        files = @($view.items | ForEach-Object {
             [ordered]@{
-                name       = $_.Name
-                size       = $_.Length
-                modifiedAt = $_.LastWriteTime.ToString("s")
+                name = $_.name
+                size = $_.size
+                modifiedAt = $_.modifiedAt
+                kind = $_.kind
+                enabled = $_.enabled
+                priority = $_.priority
+                durationSeconds = $_.durationSeconds
+                pendingDelete = $_.pendingDelete
+                order = $_.order
             }
         })
     }
@@ -849,7 +860,7 @@ function Process-CommandQueue {
             }
         }
         catch {
-            Update-Status "Errore durante la lettura di un comando remoto."
+            Set-PlaybackNotice ("Errore comando remoto: " + $_.Exception.Message) $true
         }
         finally {
             Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
@@ -879,7 +890,7 @@ function Process-CommandQueue {
         <Border Grid.Row="0" Background="#102A43" CornerRadius="14" Padding="18" Margin="0,0,0,14">
             <StackPanel>
                 <TextBlock Text="Marca Vecio Stream" Foreground="White" FontSize="28" FontWeight="Bold" />
-                <TextBlock Text="Playback VLC fullscreen/loop con controllo locale e pannello web remoto." Foreground="#D9E2EC" FontSize="14" Margin="0,6,0,0" />
+                <TextBlock Text="Slide e video in rotazione, con priorita e controllo remoto." Foreground="#D9E2EC" FontSize="14" Margin="0,6,0,0" />
             </StackPanel>
         </Border>
 
@@ -889,7 +900,7 @@ function Process-CommandQueue {
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
-                <TextBlock Text="Cartella video" FontWeight="SemiBold" />
+                <TextBlock Text="Cartella contenuti" FontWeight="SemiBold" />
                 <TextBox x:Name="VideoFolderTextBox" Margin="0,6,12,0" Height="32" VerticalContentAlignment="Center" />
             </StackPanel>
             <Button x:Name="BrowseFolderButton" Grid.Column="1" Content="Sfoglia" Width="96" Height="32" VerticalAlignment="Bottom" />
@@ -915,14 +926,68 @@ function Process-CommandQueue {
                 <ColumnDefinition Width="320" />
             </Grid.ColumnDefinitions>
 
-            <GroupBox Header="Video disponibili" Margin="0,0,14,0">
+            <GroupBox Header="Slide e video" Margin="0,0,14,0">
                 <Grid Margin="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
-                    <ListBox x:Name="VideoListBox" DisplayMemberPath="Name" BorderThickness="1" />
-                    <TextBlock Grid.Row="1" x:Name="VideoCountText" Margin="0,10,0,0" Foreground="#486581" />
+                    <ListBox x:Name="VideoListBox" BorderThickness="1">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="4" Orientation="Horizontal">
+                                    <Border Background="Black" Width="100" Height="70"><Grid><Image Source="{Binding previewBitmap}" Stretch="Uniform" /><TextBlock Text="{Binding previewStatus}" Foreground="White" FontSize="10" TextWrapping="Wrap" VerticalAlignment="Center" /></Grid></Border>
+                                    <StackPanel Margin="8,0,0,0">
+                                    <TextBlock Text="{Binding name}" FontWeight="SemiBold" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding kind}" Margin="0,0,12,0" />
+                                        <CheckBox IsChecked="{Binding enabled, Mode=OneWay}" Content="Attivo" IsHitTestVisible="False" Focusable="False" Margin="0,0,12,0" />
+                                        <CheckBox IsChecked="{Binding priority, Mode=OneWay}" Content="Prioritaria" IsHitTestVisible="False" Focusable="False" />
+                                    </StackPanel>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                        <WrapPanel Margin="0,0,0,8">
+                            <ComboBox x:Name="UploadCategoryCombo" Width="150" SelectedIndex="0" Margin="0,0,8,0"><ComboBoxItem Content="Loop normale" /><ComboBoxItem Content="Promo / evento" /><ComboBoxItem Content="Reel (video)" /><ComboBoxItem Content="Sfondo reel (foto)" /></ComboBox>
+                            <Button x:Name="UploadMediaButton" Content="Carica slide / video" Padding="10,6" Margin="0,0,8,0" />
+                            <Button x:Name="MoveUpButton" Content="Sposta su" Padding="10,6" Margin="0,0,8,0" />
+                            <Button x:Name="MoveDownButton" Content="Sposta giu" Padding="10,6" />
+                        </WrapPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="140" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Border Background="Black" Margin="0,0,10,0" Height="90"><Image x:Name="SlidePreview" Stretch="Uniform" /></Border>
+                            <StackPanel Grid.Column="1">
+                                <WrapPanel>
+                                    <CheckBox x:Name="ContentEnabledCheckBox" Content="Attivo" Margin="0,0,12,6" />
+                                    <CheckBox x:Name="ContentPriorityCheckBox" Content="Promo / evento" Margin="0,0,0,6" />
+                                    <ComboBox x:Name="ContentRoleCombo" Width="135" Margin="8,0,0,6"><ComboBoxItem Content="Loop normale" /><ComboBoxItem Content="Reel" /><ComboBoxItem Content="Sfondo reel" /></ComboBox>
+                                </WrapPanel>
+                                <WrapPanel>
+                                    <TextBlock Text="Durata slide (1-300 s)" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBox x:Name="ContentDurationTextBox" Width="55" Height="26" />
+                                </WrapPanel>
+                                <WrapPanel Margin="0,6,0,0">
+                                    <Button x:Name="SaveContentButton" Content="Salva contenuto" Padding="10,5" Margin="0,0,8,0" />
+                                    <Button x:Name="DeleteContentButton" Content="Elimina" Padding="10,5" />
+                                </WrapPanel>
+                            </StackPanel>
+                        </Grid>
+                        <WrapPanel Margin="0,10,0,0">
+                            <TextBlock Text="Apparizioni promo per giro (casuali)" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <ComboBox x:Name="PriorityFrequencyCombo" Width="60"><ComboBoxItem Content="2" /><ComboBoxItem Content="3" /><ComboBoxItem Content="4" /><ComboBoxItem Content="5" /></ComboBox>
+                        </WrapPanel>
+                        <WrapPanel Margin="0,10,0,0">
+                            <TextBlock Text="Durata tutte le immagini (s)" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <TextBox x:Name="GlobalSlideDurationTextBox" Width="55" Height="26" Text="10" Margin="0,0,8,0" />
+                            <Button x:Name="ApplySlideDurationButton" Content="Applica a tutte" Padding="10,5" />
+                        </WrapPanel>
+                        <TextBlock Text="Video normali: durata integrale. Reel: tre casuali, 30 s, in loop e senza audio. Sfondo: ultima immagine sfondo attiva." TextWrapping="Wrap" Foreground="#486581" Margin="0,5,0,0" />
+                    </StackPanel>
+                    <TextBlock Grid.Row="2" x:Name="VideoCountText" Margin="0,10,0,0" Foreground="#486581" TextWrapping="Wrap" />
                 </Grid>
             </GroupBox>
 
@@ -933,9 +998,25 @@ function Process-CommandQueue {
                             <TextBlock Text="Comandi playback" FontSize="18" FontWeight="Bold" Margin="0,0,0,12" />
                             <Button x:Name="RefreshButton" Content="Aggiorna elenco" Height="38" Margin="0,0,0,10" />
                             <Button x:Name="PlaySelectedButton" Content="Riproduci selezionato" Height="38" Margin="0,0,0,10" />
-                            <Button x:Name="PlayAllButton" Content="Riproduci tutta la cartella" Height="38" Margin="0,0,0,10" />
+                            <Button x:Name="PlayAllButton" Content="Avvia rotazione" Height="38" Margin="0,0,0,10" />
                             <Button x:Name="StopButton" Content="Ferma playback" Height="38" Margin="0,0,0,10" />
-                            <Button x:Name="OpenFolderButton" Content="Apri cartella video" Height="38" />
+                            <TextBlock Text="Ctrl + Alt + S: ferma il player e torna all'app" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="#486581" />
+                            <Button x:Name="OpenFolderButton" Content="Apri cartella contenuti" Height="38" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Background="#F8FAFC" CornerRadius="12" Padding="14" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Aggiornamenti app" FontSize="18" FontWeight="Bold" Margin="0,0,0,8" />
+                            <TextBlock x:Name="AppVersionText" Margin="0,0,0,10" />
+                            <Button x:Name="CheckUpdatesButton" Content="Cerca aggiornamenti" Height="34" Margin="0,0,0,8" />
+                            <Button x:Name="InstallUpdateButton" Content="Scarica e installa" IsEnabled="False" Height="34" Margin="0,0,0,8" />
+                            <TextBlock x:Name="UpdateStatusText" TextWrapping="Wrap" Margin="0,0,0,10" />
+                            <TextBlock Text="Token GitHub (solo questo repository, Contents: lettura)" TextWrapping="Wrap" />
+                            <PasswordBox x:Name="GithubTokenPasswordBox" Height="32" Margin="0,6,0,8" />
+                            <Button x:Name="SaveGithubTokenButton" Content="Salva accesso (vuoto per rimuoverlo)" Height="34" Margin="0,0,0,8" />
+                            <Button x:Name="OpenReleasesButton" Content="Release e versioni precedenti" Height="34" />
+                            <TextBlock Text="L'installazione chiude app e playback. Foto, video e impostazioni vengono conservati." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#52667A" />
                         </StackPanel>
                     </Border>
 
@@ -994,7 +1075,7 @@ function Process-CommandQueue {
         </Grid>
 
         <Border Grid.Row="4" Background="#E6EEF5" CornerRadius="10" Padding="12" Margin="0,14,0,0">
-            <TextBlock x:Name="StatusText" Text="Pronto." Foreground="#102A43" />
+            <TextBlock x:Name="StatusText" Text="Pronto." Foreground="#102A43" TextWrapping="Wrap" />
         </Border>
     </Grid>
 </Window>
@@ -1011,6 +1092,122 @@ $browseVlcButton = $window.FindName("BrowseVlcButton")
 $saveSettingsButton = $window.FindName("SaveSettingsButton")
 $videoListBox = $window.FindName("VideoListBox")
 $videoCountText = $window.FindName("VideoCountText")
+$priorityFrequencyCombo = $window.FindName('PriorityFrequencyCombo')
+$globalSlideDurationTextBox = $window.FindName('GlobalSlideDurationTextBox')
+$contentEnabledCheckBox = $window.FindName('ContentEnabledCheckBox')
+$contentPriorityCheckBox = $window.FindName('ContentPriorityCheckBox')
+$contentDurationTextBox = $window.FindName('ContentDurationTextBox')
+$slidePreview = $window.FindName('SlidePreview')
+$script:UpdatingContentUi = $false
+$script:ContentUiSignature = ''
+
+function Show-ContentSelection {
+    $item = $videoListBox.SelectedItem
+    $slidePreview.Source = $null
+    $contentEnabledCheckBox.IsEnabled = ($null -ne $item -and -not $item.pendingDelete)
+    $contentPriorityCheckBox.IsEnabled = ($null -ne $item -and $item.kind -eq 'slide' -and -not $item.pendingDelete)
+    $contentDurationTextBox.IsEnabled = $contentPriorityCheckBox.IsEnabled
+    $roleCombo = $window.FindName('ContentRoleCombo')
+    $roleCombo.IsEnabled = ($null -ne $item -and -not $item.pendingDelete)
+    if (-not $item) { return }
+    $contentEnabledCheckBox.IsChecked = $item.enabled
+    $contentPriorityCheckBox.IsChecked = $item.priority
+    $contentDurationTextBox.Text = [string]$item.durationSeconds
+    $window.FindName('ContentRoleCombo').SelectedIndex = switch ($item.kind) { 'reel' { 1 }; 'background' { 2 }; default { 0 } }
+    $roleCombo.Items[1].IsEnabled = ($item.kind -in @('video','reel'))
+    $roleCombo.Items[2].IsEnabled = ($item.kind -in @('slide','background'))
+    if (-not $item.pendingDelete) {
+        try {
+            $slidePreview.Source = Get-ContentPreviewBitmap $item
+        } catch { Update-Status 'Anteprima non disponibile: contenuto non leggibile.' }
+    }
+}
+
+function Sync-ContentUi {
+    Update-PlaybackCatalog $videoFolderTextBox.Text
+    if ($script:ContentUiSignature -ne $script:PlaybackSignature) {
+        Refresh-VideoList
+        $script:ContentUiSignature = $script:PlaybackSignature
+    }
+}
+
+function Invoke-ContentUiAction([scriptblock]$Action) {
+    try { & $Action; Sync-ContentUi; Write-StateFile }
+    catch { Update-Status $_.Exception.Message }
+}
+
+$videoListBox.Add_SelectionChanged({ Show-ContentSelection })
+$window.FindName('ApplySlideDurationButton').Add_Click({
+    Invoke-ContentUiAction {
+        $seconds = 0
+        if (-not [int]::TryParse($globalSlideDurationTextBox.Text, [ref]$seconds)) { throw 'Durata immagini: numero intero da 1 a 300 secondi.' }
+        Set-MediaSlideDuration $videoFolderTextBox.Text $seconds
+        Update-Status 'Durata applicata a tutte le immagini. I video restano completi.'
+    }
+})
+$window.FindName('SaveContentButton').Add_Click({
+    Invoke-ContentUiAction {
+        $item = $videoListBox.SelectedItem
+        if (-not $item) { throw 'Seleziona un contenuto.' }
+        $changes = [pscustomobject]@{ enabled = [bool]$contentEnabledCheckBox.IsChecked }
+        $changes | Add-Member role (@('loop','reel','background')[$window.FindName('ContentRoleCombo').SelectedIndex])
+        if ($item.kind -eq 'slide') {
+            $duration = 0
+            if (-not [int]::TryParse($contentDurationTextBox.Text, [ref]$duration)) { throw 'Durata slide non valida.' }
+            $changes | Add-Member priority ([bool]$contentPriorityCheckBox.IsChecked)
+            $changes | Add-Member durationSeconds $duration
+        }
+        Update-MediaItem $videoFolderTextBox.Text $item.name $changes
+        Update-Status 'Contenuto salvato. Aggiornamento automatico al prossimo contenuto.'
+    }
+})
+$priorityFrequencyCombo.Add_SelectionChanged({
+    if (-not $script:UpdatingContentUi -and $priorityFrequencyCombo.SelectedIndex -ge 0) {
+        Invoke-ContentUiAction { Set-MediaFrequency $videoFolderTextBox.Text ($priorityFrequencyCombo.SelectedIndex + 2) }
+    }
+})
+$window.FindName('DeleteContentButton').Add_Click({
+    Invoke-ContentUiAction {
+        $item = $videoListBox.SelectedItem
+        if (-not $item) { throw 'Seleziona un contenuto.' }
+        if ([Windows.MessageBox]::Show("Eliminare $($item.name)?", $AppName, 'YesNo', 'Question') -eq 'Yes') {
+            Request-MediaDelete $videoFolderTextBox.Text $item.name
+            Update-Status 'Eliminazione richiesta. Il contenuto in corso puo terminare.'
+        }
+    }
+})
+function Move-SelectedContent([int]$Direction) {
+    Invoke-ContentUiAction {
+        $names = @((Get-MediaView $videoFolderTextBox.Text).items | ForEach-Object { $_.name })
+        $selected = $videoListBox.SelectedItem
+        if (-not $selected) { return }
+        $index = [array]::IndexOf($names, $selected.name)
+        $next = $index + $Direction
+        if ($index -lt 0 -or $next -lt 0 -or $next -ge $names.Count) { return }
+        $swap = $names[$index]; $names[$index] = $names[$next]; $names[$next] = $swap
+        Set-MediaOrder $videoFolderTextBox.Text $names
+    }
+}
+$window.FindName('MoveUpButton').Add_Click({ Move-SelectedContent -1 })
+$window.FindName('MoveDownButton').Add_Click({ Move-SelectedContent 1 })
+$window.FindName('UploadMediaButton').Add_Click({
+    Invoke-ContentUiAction {
+        $uploadAsPromo = ($window.FindName('UploadCategoryCombo').SelectedIndex -eq 1)
+        $dialog = New-Object Windows.Forms.OpenFileDialog
+        $dialog.Multiselect = $true
+        $dialog.Filter = 'Slide e video|*.jpg;*.jpeg;*.png;*.mp4;*.mkv;*.avi;*.mov;*.wmv;*.m4v;*.webm'
+        if ($dialog.ShowDialog() -eq [Windows.Forms.DialogResult]::OK) {
+            foreach ($path in $dialog.FileNames) {
+                $stream = [IO.File]::OpenRead($path)
+                $priority = $uploadAsPromo -and ([IO.Path]::GetExtension($path) -match '^\.(jpg|jpeg|png)$')
+                $role = switch ($window.FindName('UploadCategoryCombo').SelectedIndex) { 2 { 'reel' }; 3 { 'background' }; default { 'loop' } }
+                try { Save-MediaStream $videoFolderTextBox.Text ([IO.Path]::GetFileName($path)) $stream $stream.Length $priority $role | Out-Null }
+                finally { $stream.Dispose() }
+            }
+            Update-Status 'Caricamento completato.'
+        }
+    }
+})
 $refreshButton = $window.FindName("RefreshButton")
 $playSelectedButton = $window.FindName("PlaySelectedButton")
 $playAllButton = $window.FindName("PlayAllButton")
@@ -1034,6 +1231,7 @@ $telegramTokenPasswordBox = $window.FindName("TelegramTokenPasswordBox")
 $statusText = $window.FindName("StatusText")
 
 try {
+    Initialize-AppUpdater
     $config = Load-Config
     Apply-ConfigToUi -Config $config
     Configure-LaunchOnLogin -Enabled $config.launchOnLogin
@@ -1045,7 +1243,7 @@ try {
 
     $browseFolderButton.Add_Click({
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = "Seleziona la cartella che contiene i video"
+    $dialog.Description = "Seleziona la cartella che contiene slide e video"
     $dialog.ShowNewFolderButton = $true
 
     if (-not [string]::IsNullOrWhiteSpace($videoFolderTextBox.Text) -and (Test-Path -LiteralPath $videoFolderTextBox.Text)) {
@@ -1133,7 +1331,7 @@ try {
     try {
         $selected = $videoListBox.SelectedItem
         if (-not $selected) {
-            throw "Seleziona un video dall'elenco."
+            throw "Seleziona un contenuto dall'elenco."
         }
 
         Start-PlaySelected -FileName $selected.Name
@@ -1224,21 +1422,33 @@ try {
         }
 
         Process-CommandQueue
+        Sync-ContentUi
+        if ([IO.Directory]::Exists($videoFolderTextBox.Text)) {
+            $currentName = if ($script:PlaybackCurrent -and $script:PlaybackCurrent.folder -eq $videoFolderTextBox.Text) { $script:PlaybackCurrent.names } else { @() }
+            Complete-MediaDeletes $videoFolderTextBox.Text $currentName
+        }
         Write-StateFile
         Start-WebServerProcess
         Start-NgrokProcess
         Start-TelegramWorkerProcess
     }
     catch {
+        Write-AppLog ('Errore sincronizzazione: ' + $_.Exception.Message)
+        Update-Status $_.Exception.Message
     }
     })
     $syncTimer.Start()
+
+    $playbackTimer = New-Object Windows.Threading.DispatcherTimer
+    $playbackTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $playbackTimer.Add_Tick({ Update-ControlledPlayback })
+    $playbackTimer.Start()
 
     $window.Add_ContentRendered({
     Refresh-VideoList
     Write-StateFile
 
-    if ($autoStartPlaybackCheckBox.IsChecked) {
+    if ($autoStartPlaybackCheckBox.IsChecked -or $kioskModeCheckBox.IsChecked) {
         try {
             Start-PlayAll
             Write-StateFile
@@ -1254,7 +1464,11 @@ try {
     })
 
     $window.Add_Closing({
+    $script:ApplicationClosing = $true
+    $script:UpdaterTimer.Stop()
+    Stop-AppUpdateJob
     $syncTimer.Stop()
+    $playbackTimer.Stop()
     Stop-Playback
     if ($script:WebServerOwnedPid) {
         Stop-WebServerProcess

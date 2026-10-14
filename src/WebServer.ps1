@@ -25,6 +25,7 @@ $LogoJpgPath = Join-Path $AppRoot "logoapp.png.jpg"
 $LogoIcoPath = Join-Path $AppRoot "logoapp.ico"
 $PidPath = Join-Path $ConfigRoot "webserver.pid"
 $SupportedExtensions = @(".mp4", ".mkv", ".avi", ".mov", ".wmv", ".m4v", ".webm")
+. (Join-Path $AppRoot 'MediaCatalog.ps1')
 
 foreach ($path in @($ConfigRoot, $CommandRoot)) {
     if (-not (Test-Path -LiteralPath $path)) {
@@ -157,54 +158,26 @@ function Test-Authorized([System.Net.HttpListenerRequest]$Request, $Config) {
 }
 
 function Get-SafeFileName([string]$FileName) {
-    if ([string]::IsNullOrWhiteSpace($FileName)) {
-        throw "Nome file mancante."
-    }
-
-    $nameOnly = [System.IO.Path]::GetFileName($FileName)
-    if ($nameOnly -ne $FileName) {
-        throw "Nome file non valido."
-    }
-
-    $extension = [System.IO.Path]::GetExtension($nameOnly).ToLowerInvariant()
-    if ($SupportedExtensions -notcontains $extension) {
-        throw "Estensione non supportata."
-    }
-
-    return $nameOnly
+    return Get-MediaName $FileName
 }
 
 function Save-UploadedFile([System.Net.HttpListenerRequest]$Request, $Config) {
-    if ([string]::IsNullOrWhiteSpace($Config.videoFolder) -or -not (Test-Path -LiteralPath $Config.videoFolder)) {
-        throw "La cartella video configurata non e valida."
-    }
-
     $fileName = Get-SafeFileName -FileName $Request.QueryString["filename"]
-    $destination = Join-Path $Config.videoFolder $fileName
-    $target = [System.IO.File]::Open($destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    $priorityValue = $Request.QueryString['priority']
+    if ($null -ne $priorityValue -and $priorityValue -notin @('true','false')) { Throw-MediaError 'Scelta promo non valida.' }
+    $priority = ($priorityValue -eq 'true')
+    $role = $Request.QueryString['role']
+    if ([string]::IsNullOrWhiteSpace($role)) { $role = 'loop' }
     try {
-        $Request.InputStream.CopyTo($target)
+        return Save-MediaStream $Config.videoFolder $fileName $Request.InputStream $Request.ContentLength64 $priority $role
     }
     finally {
-        $target.Dispose()
         $Request.InputStream.Dispose()
     }
-
-    return $destination
 }
 
 function Remove-ManagedFile([string]$FileName, $Config) {
-    if ([string]::IsNullOrWhiteSpace($Config.videoFolder) -or -not (Test-Path -LiteralPath $Config.videoFolder)) {
-        throw "La cartella video configurata non e valida."
-    }
-
-    $safeName = Get-SafeFileName -FileName $FileName
-    $path = Join-Path $Config.videoFolder $safeName
-    if (-not (Test-Path -LiteralPath $path)) {
-        throw "File non trovato."
-    }
-
-    Remove-Item -LiteralPath $path -Force
+    Request-MediaDelete $Config.videoFolder $FileName
 }
 
 function Get-ValueOrDefault($Value, $DefaultValue) {
@@ -296,7 +269,18 @@ try {
                     continue
                 }
 
-                Send-Json -Response $response -Object (Read-State)
+                $state = Read-State
+                $view = if ([IO.Directory]::Exists($config.videoFolder)) { Get-MediaView $config.videoFolder } else { [pscustomobject]@{ items = @(); priorityFrequency = 2; slideDurationSeconds = 10 } }
+                $publicFiles = @($view.items | Select-Object name,kind,role,enabled,priority,durationSeconds,pendingDelete,order,size,modifiedAt)
+                if ($state -is [Collections.IDictionary]) {
+                    $state.files = $publicFiles; $state['priorityFrequency'] = $view.priorityFrequency
+                    $state['slideDurationSeconds'] = $view.slideDurationSeconds
+                } else {
+                    $state | Add-Member -NotePropertyName files -NotePropertyValue $publicFiles -Force
+                    $state | Add-Member -NotePropertyName priorityFrequency -NotePropertyValue $view.priorityFrequency -Force
+                    $state | Add-Member -NotePropertyName slideDurationSeconds -NotePropertyValue $view.slideDurationSeconds -Force
+                }
+                Send-Json -Response $response -Object $state
                 continue
             }
 
@@ -313,7 +297,42 @@ try {
 
             if ($path -eq "/api/files" -and $request.HttpMethod -eq "DELETE") {
                 Remove-ManagedFile -FileName $request.QueryString["name"] -Config $config
-                Send-Json -Response $response -Object @{ ok = $true }
+                Send-Json -Response $response -Object @{ ok = $true; pendingDelete = $true }
+                continue
+            }
+
+            if ($path -eq '/api/content' -and $request.HttpMethod -eq 'PATCH') {
+                $body = Get-RequestBodyText $request | ConvertFrom-Json
+                Update-MediaItem $config.videoFolder $request.QueryString['name'] $body
+                Send-Json $response @{ ok = $true }
+                continue
+            }
+            if ($path -eq '/api/order' -and $request.HttpMethod -eq 'POST') {
+                $body = Get-RequestBodyText $request | ConvertFrom-Json
+                Set-MediaOrder $config.videoFolder @($body.names)
+                Send-Json $response @{ ok = $true }
+                continue
+            }
+            if ($path -eq '/api/rotation' -and $request.HttpMethod -eq 'POST') {
+                $body = Get-RequestBodyText $request | ConvertFrom-Json
+                Set-MediaFrequency $config.videoFolder $body.priorityFrequency
+                Send-Json $response @{ ok = $true }
+                continue
+            }
+            if ($path -eq '/api/slide-duration' -and $request.HttpMethod -eq 'POST') {
+                $body = Get-RequestBodyText $request | ConvertFrom-Json
+                Set-MediaSlideDuration $config.videoFolder $body.slideDurationSeconds
+                Send-Json $response @{ ok = $true }
+                continue
+            }
+            if ($path -eq '/api/preview' -and $request.HttpMethod -eq 'GET') {
+                $name = Get-MediaName $request.QueryString['name']
+                $item = (Get-MediaView $config.videoFolder).items | Where-Object { $_.name -eq $name -and -not $_.pendingDelete } | Select-Object -First 1
+                if (-not $item) { Throw-MediaError 'Anteprima non trovata.' 404 }
+                $previewPath = Get-MediaPreview $item.fullName $config.vlcPath
+                $response.Headers['Cache-Control'] = 'no-store'
+                $response.Headers['X-Content-Type-Options'] = 'nosniff'
+                Send-File $response $previewPath $(if ([IO.Path]::GetExtension($previewPath) -eq '.png') { 'image/png' } else { 'image/jpeg' })
                 continue
             }
 
@@ -348,7 +367,8 @@ try {
             Send-Json -Response $response -Object @{ error = "Not found" } -StatusCode 404
         }
         catch {
-            Send-Json -Response $response -Object @{ error = $_.Exception.Message } -StatusCode 500
+            $status = if ($_.Exception.Data.Contains('HttpStatus')) { [int]$_.Exception.Data['HttpStatus'] } else { 500 }
+            try { Send-Json -Response $response -Object @{ error = $_.Exception.Message } -StatusCode $status } catch { $response.Abort() }
         }
     }
 }

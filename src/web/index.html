@@ -38,6 +38,14 @@
     .checkboxes { display:grid; gap:8px; margin-top:6px; margin-bottom:8px; }
     .checkboxes label { display:flex; align-items:center; gap:8px; margin:0; color:var(--ink); }
     .pill { background:#edf2f7; border-radius:999px; padding:8px 12px; font-size:.9rem; color:var(--ink); }
+    .preview { width:120px; height:80px; object-fit:contain; background:#000; border-radius:8px; }
+    .file-item { grid-template-columns:120px 1fr; }
+    .file-actions { grid-column:1 / -1; justify-content:flex-start; align-items:center; }
+    .file-actions label { display:flex; align-items:center; gap:6px; margin:0; color:var(--ink); }
+    .file-actions input[type="number"] { width:80px; }
+    select { border:1px solid var(--line); border-radius:10px; padding:8px; }
+    button:disabled { opacity:.45; cursor:default; }
+    .playback-status { margin:12px 0; color:var(--muted); }
     @media (max-width:920px) { .grid,.row { grid-template-columns:1fr; } }
   </style>
 </head>
@@ -45,11 +53,11 @@
   <div class="shell">
     <section class="hero">
       <h1>Marca Vecio Stream</h1>
-      <p>Controllo remoto del playback VLC e gestione dei video nella cartella configurata.</p>
+      <p>Slide e video in rotazione. Dai piu spazio ai contenuti importanti.</p>
     </section>
     <div class="grid">
       <section class="card">
-        <h2>Controllo e file</h2>
+        <h2>Slide e video</h2>
         <div id="message" class="status">Inserisci il token e premi Aggiorna.</div>
         <div id="progressWrap" class="progress-wrap">
           <div id="progressLabel" class="progress-label">Upload in corso...</div>
@@ -59,14 +67,27 @@
         </div>
         <div class="toolbar">
           <button id="refreshBtn">Aggiorna</button>
-          <button id="playAllBtn">Play cartella</button>
+          <button id="playAllBtn">Avvia rotazione</button>
           <button id="stopBtn" class="secondary">Stop</button>
         </div>
         <div class="upload-row">
-          <input id="uploadInput" type="file" accept=".mp4,.mkv,.avi,.mov,.wmv,.m4v,.webm" multiple>
+          <label for="uploadCategory">Destinazione</label>
+          <select id="uploadCategory"><option value="loop">Loop normale</option><option value="promo">Promo / evento</option><option value="reel">Reel (video)</option><option value="background">Sfondo reel (foto)</option></select>
+          <input id="uploadInput" type="file" accept=".jpg,.jpeg,.png,.mp4,.mkv,.avi,.mov,.wmv,.m4v,.webm" multiple>
           <button id="uploadBtn">Carica file</button>
         </div>
+        <p>La scelta vale per tutte le foto selezionate. I video entrano nel loop normale.</p>
         <div id="statePills" class="pill-row"></div>
+        <div id="playbackStatus" class="playback-status" aria-live="polite"></div>
+        <label for="priorityFrequency">Apparizioni delle promo per giro (ordine casuale)</label>
+        <select id="priorityFrequency"><option value="2">2 volte</option><option value="3">3 volte</option><option value="4">4 volte</option><option value="5">5 volte</option></select>
+        <label for="globalSlideDuration" style="margin-top:12px;">Durata di tutte le immagini (secondi)</label>
+        <div class="toolbar">
+          <input id="globalSlideDuration" type="number" min="1" max="300" step="1" value="10" style="width:100px;">
+          <button id="applySlideDurationBtn">Applica a tutte</button>
+        </div>
+        <p>I video vengono riprodotti fino alla fine. Anche le nuove immagini useranno questa durata.</p>
+        <p>Le modifiche si applicano automaticamente dopo il contenuto in corso.</p>
         <div id="fileList" class="file-list"></div>
       </section>
       <section class="card">
@@ -80,7 +101,7 @@
         </div>
         <div class="row">
           <div>
-            <label for="videoFolderInput">Cartella video</label>
+            <label for="videoFolderInput">Cartella contenuti</label>
             <input id="videoFolderInput" type="text">
           </div>
           <div>
@@ -152,9 +173,17 @@
     function authHeaders() { return { "X-Auth-Token": tokenInput.value.trim() }; }
     function formatSize(bytes) { if (!bytes && bytes !== 0) return "-"; const units = ["B","KB","MB","GB"]; let value = bytes; let idx = 0; while (value >= 1024 && idx < units.length - 1) { value /= 1024; idx += 1; } return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`; }
     async function api(path, options = {}) { const response = await fetch(path, { ...options, headers: { ...(options.headers || {}), ...authHeaders() } }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`); return payload; }
-    function renderState(data) {
+    let latestFiles = [];
+    let fileSignature = "";
+    let settingsInitialized = false;
+    let refreshBusy = false;
+    const previews = new Map();
+    const frequency = document.getElementById("priorityFrequency");
+    const globalSlideDuration = document.getElementById("globalSlideDuration");
+    function renderState(data, force = false) {
       const cfg = data.config || {};
       const playback = data.playback || {};
+      if (!settingsInitialized) {
       fields.videoFolder.value = cfg.videoFolder || "";
       fields.vlcPath.value = cfg.vlcPath || "";
       fields.webPort.value = cfg.webPort || 8090;
@@ -162,21 +191,125 @@
       fields.launchOnLogin.checked = !!cfg.launchOnLogin;
       fields.autoStartPlayback.checked = !!cfg.autoStartPlayback;
       fields.kioskMode.checked = !!cfg.kioskMode;
+        settingsInitialized = true;
+      }
+      if (document.activeElement !== frequency) frequency.value = String(data.priorityFrequency || 2);
+      if (document.activeElement !== globalSlideDuration) globalSlideDuration.value = String(data.slideDurationSeconds || 10);
       statePills.innerHTML = "";
       [`Playback: ${playback.isRunning ? "attivo" : "fermo"}`, `File: ${(data.files || []).length}`, `Web: ${cfg.webUrl || "-"}`, `Token: ${cfg.remoteTokenSet ? "configurato" : "mancante"}`].forEach(text => {
         const pill = document.createElement("div"); pill.className = "pill"; pill.textContent = text; statePills.appendChild(pill);
       });
-      fileList.innerHTML = "";
-      (data.files || []).forEach(file => {
-        const item = document.createElement("div");
-        item.className = "file-item";
-        item.innerHTML = `<div class="file-meta"><strong>${file.name}</strong><span>${formatSize(file.size)} · ${file.modifiedAt || "-"}</span></div><div class="file-actions"><button data-play="${file.name}">Play</button><button class="danger" data-delete="${file.name}">Elimina</button></div>`;
-        fileList.appendChild(item);
-      });
+      const playbackStatus = document.getElementById("playbackStatus");
+      playbackStatus.textContent = [playback.message, playback.pendingChanges ? "Modifiche in attesa del prossimo contenuto." : "", playback.error].filter(Boolean).join(" ");
+      latestFiles = data.files || [];
+      const signature = JSON.stringify(latestFiles) + tokenInput.value;
+      if (!force && (signature === fileSignature || fileList.contains(document.activeElement))) return;
+      fileSignature = signature;
+      const keep = new Set(latestFiles.map(file => `${tokenInput.value}|${file.name}|${file.modifiedAt}|${file.size}`));
+      for (const [key, url] of previews) if (!keep.has(key)) { URL.revokeObjectURL(url); previews.delete(key); }
+      fileList.replaceChildren();
+      latestFiles.forEach((file, index) => renderFile(file, index));
     }
-    async function refresh() { try { const data = await api("/api/status"); renderState(data); setMessage("Stato aggiornato."); } catch (error) { setMessage(error.message, true); } }
+    function element(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== undefined) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+    function actionButton(text, handler, disabled = false, className = "") {
+      const button = element("button", text, className);
+      button.disabled = disabled;
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        try { await handler(); await refresh(true); }
+        catch (error) { setMessage(error.message, true); }
+        finally { button.disabled = disabled; }
+      });
+      return button;
+    }
+    async function loadPreview(img, file) {
+      const key = `${tokenInput.value}|${file.name}|${file.modifiedAt}|${file.size}`;
+      try {
+        let url = previews.get(key);
+        if (!url) {
+          const response = await fetch(`/api/preview?name=${encodeURIComponent(file.name)}`, { headers: authHeaders() });
+          if (!response.ok) throw new Error("Anteprima non disponibile");
+          url = URL.createObjectURL(await response.blob());
+          if (!img.isConnected) { URL.revokeObjectURL(url); return; }
+          previews.set(key, url);
+        }
+        img.src = url;
+      } catch (_) { img.alt = "Anteprima non disponibile"; }
+    }
+    function renderFile(file, index) {
+      const item = element("div", undefined, "file-item");
+      if (!file.pendingDelete) {
+        const img = element("img", undefined, "preview"); img.alt = file.name; item.appendChild(img);
+        setTimeout(() => loadPreview(img, file), 0);
+      } else item.appendChild(element("div", file.kind === "reel" ? "Reel · 30 s" : "Video", "preview"));
+      const meta = element("div", undefined, "file-meta");
+      meta.append(element("strong", file.name), element("span", `${formatSize(file.size)} · ${file.modifiedAt || "-"}${file.pendingDelete ? " · Eliminazione in attesa" : ""}`));
+      item.appendChild(meta);
+      const actions = element("div", undefined, "file-actions");
+      const enabled = element("input"); enabled.type = "checkbox"; enabled.checked = !!file.enabled; enabled.disabled = !!file.pendingDelete;
+      const enabledLabel = element("label"); enabledLabel.append(enabled, document.createTextNode("Attivo")); actions.appendChild(enabledLabel);
+      const role = element("select");
+      const video = ["video", "reel"].includes(file.kind);
+      for (const [value, label] of [["loop", "Loop normale"], video ? ["reel", "Reel · 30 s, senza audio"] : ["background", "Sfondo reel"]]) {
+        const option = element("option", label); option.value = value; role.appendChild(option);
+      }
+      role.value = file.role || "loop"; role.disabled = !!file.pendingDelete; actions.appendChild(role);
+      let priority, duration;
+      if (file.kind === "slide") {
+        priority = element("input"); priority.type = "checkbox"; priority.checked = !!file.priority; priority.disabled = !!file.pendingDelete;
+        const label = element("label"); label.append(priority, document.createTextNode("Promo / evento")); actions.appendChild(label);
+        duration = element("input"); duration.type = "number"; duration.min = "1"; duration.max = "300"; duration.step = "1"; duration.value = file.durationSeconds; duration.disabled = !!file.pendingDelete;
+        const durationLabel = element("label"); durationLabel.append(document.createTextNode("Secondi"), duration); actions.appendChild(durationLabel);
+      }
+      actions.appendChild(actionButton("Salva", async () => {
+        const changes = { enabled: enabled.checked, role: role.value };
+        if (duration) {
+          if (!duration.checkValidity() || !duration.value || !Number.isInteger(Number(duration.value))) throw new Error("Durata: numero intero da 1 a 300 secondi.");
+          changes.priority = priority.checked; changes.durationSeconds = Number(duration.value);
+        }
+        await api(`/api/content?name=${encodeURIComponent(file.name)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(changes) });
+        setMessage("Contenuto salvato. La rotazione si aggiorna automaticamente.");
+      }, !!file.pendingDelete));
+      actions.appendChild(actionButton("Play", () => playSelected(file.name), file.kind === "background" || !file.enabled || !!file.pendingDelete));
+      for (const [label, direction] of [["Su", -1], ["Giu", 1]]) {
+        actions.appendChild(actionButton(label, async () => {
+          const names = latestFiles.map(entry => entry.name);
+          const currentIndex = names.indexOf(file.name);
+          if (currentIndex < 0 || currentIndex + direction < 0 || currentIndex + direction >= names.length) return;
+          [names[currentIndex], names[currentIndex + direction]] = [names[currentIndex + direction], names[currentIndex]];
+          await api("/api/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ names }) });
+        }, index + direction < 0 || index + direction >= latestFiles.length));
+      }
+      actions.appendChild(actionButton("Elimina", () => deleteFile(file.name), !!file.pendingDelete, "danger"));
+      item.appendChild(actions); fileList.appendChild(item);
+    }
+    async function refresh(force = false) {
+      if (refreshBusy) return;
+      refreshBusy = true;
+      try { const data = await api("/api/status"); renderState(data, force === true); }
+      catch (error) { setMessage(error.message, true); }
+      finally { refreshBusy = false; }
+    }
     async function playSelected(fileName) { await api("/api/play-selected", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName }) }); setMessage(`Comando inviato: ${fileName}`); setTimeout(refresh, 700); }
-    async function deleteFile(fileName) { if (!confirm(`Eliminare ${fileName}?`)) return; await api(`/api/files?name=${encodeURIComponent(fileName)}`, { method: "DELETE" }); setMessage(`File eliminato: ${fileName}`); refresh(); }
+    async function deleteFile(fileName) { if (!confirm(`Eliminare ${fileName}?`)) return; await api(`/api/files?name=${encodeURIComponent(fileName)}`, { method: "DELETE" }); setMessage(`Eliminazione richiesta: ${fileName}. Il contenuto in corso puo terminare.`); }
+    frequency.addEventListener("change", async () => {
+      try { await api("/api/rotation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ priorityFrequency: Number(frequency.value) }) }); setMessage("Frequenza aggiornata."); await refresh(); }
+      catch (error) { setMessage(error.message, true); }
+    });
+    document.getElementById("applySlideDurationBtn").addEventListener("click", async () => {
+      const seconds = Number(globalSlideDuration.value);
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300) { setMessage("Durata immagini: numero intero da 1 a 300 secondi.", true); return; }
+      try {
+        await api("/api/slide-duration", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ slideDurationSeconds: seconds }) });
+        setMessage("Durata applicata a tutte le immagini. I video restano completi.");
+        await refresh(true);
+      } catch (error) { setMessage(error.message, true); }
+    });
     document.getElementById("refreshBtn").addEventListener("click", refresh);
     document.getElementById("playAllBtn").addEventListener("click", async () => { try { await api("/api/play-all", { method: "POST" }); setMessage("Comando play cartella inviato."); setTimeout(refresh, 700); } catch (error) { setMessage(error.message, true); } });
     document.getElementById("stopBtn").addEventListener("click", async () => { try { await api("/api/stop", { method: "POST" }); setMessage("Comando stop inviato."); setTimeout(refresh, 700); } catch (error) { setMessage(error.message, true); } });
@@ -194,18 +327,29 @@
           remoteToken: remoteTokenInput.value.trim() || tokenInput.value.trim()
         }) });
         setMessage("Impostazioni salvate. Se hai cambiato token, aggiorna anche il campo token qui sopra.");
-        refresh();
+        settingsInitialized = false;
+        if (remoteTokenInput.value.trim()) { tokenInput.value = remoteTokenInput.value.trim(); localStorage.setItem("marca-vecio-token", tokenInput.value); remoteTokenInput.value = ""; }
+        refresh(true);
       } catch (error) { setMessage(error.message, true); }
     });
     document.getElementById("uploadBtn").addEventListener("click", async () => {
       const files = Array.from(document.getElementById("uploadInput").files || []);
       if (!files.length) { setMessage("Seleziona almeno un file da caricare.", true); return; }
+      const uploadCategory = document.getElementById("uploadCategory");
+      const uploadAsPromo = uploadCategory.value === "promo";
+      const uploadRole = ["reel", "background"].includes(uploadCategory.value) ? uploadCategory.value : "loop";
+      if (files.some(file => uploadRole === "reel" ? /\.(jpe?g|png)$/i.test(file.name) : uploadRole === "background" && !/\.(jpe?g|png)$/i.test(file.name))) {
+        setMessage("Reel: seleziona solo video. Sfondo reel: seleziona solo immagini JPG/PNG.", true); return;
+      }
+      uploadCategory.disabled = true;
+      document.getElementById("uploadBtn").disabled = true;
       try {
         let completed = 0;
         for (const file of files) {
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open("POST", `/api/upload?filename=${encodeURIComponent(file.name)}`);
+            const priority = uploadAsPromo && /\.(jpe?g|png)$/i.test(file.name);
+            xhr.open("POST", `/api/upload?filename=${encodeURIComponent(file.name)}&priority=${priority}&role=${uploadRole}`);
             Object.entries(authHeaders()).forEach(([key, value]) => xhr.setRequestHeader(key, value));
             xhr.upload.onprogress = event => {
               if (!event.lengthComputable) return;
@@ -228,12 +372,12 @@
             xhr.send(file);
           });
         }
-        setMessage("Upload completato."); document.getElementById("uploadInput").value = ""; refresh();
+        setMessage("Upload completato."); document.getElementById("uploadInput").value = ""; refresh(true);
       } catch (error) { setMessage(error.message, true); }
-      finally { setTimeout(resetUploadProgress, 600); }
+      finally { document.getElementById("uploadBtn").disabled = false; uploadCategory.disabled = false; setTimeout(resetUploadProgress, 600); refresh(true); }
     });
-    fileList.addEventListener("click", async event => { const play = event.target.getAttribute("data-play"); const del = event.target.getAttribute("data-delete"); try { if (play) await playSelected(play); if (del) await deleteFile(del); } catch (error) { setMessage(error.message, true); } });
     refresh();
+    setInterval(() => { if (!document.hidden && tokenInput.value.trim()) refresh(); }, 3000);
   </script>
 </body>
 </html>

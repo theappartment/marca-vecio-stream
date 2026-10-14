@@ -38,11 +38,21 @@ Copy-IfExists -SourcePath (Join-Path $sourceRoot "src\MarcaVecioPlayer.ps1") -De
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "src\WebServer.ps1") -DestinationPath (Join-Path $installRoot "WebServer.ps1")
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "src\TelegramWorker.ps1") -DestinationPath (Join-Path $installRoot "TelegramWorker.ps1")
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "src\launcher.vbs") -DestinationPath (Join-Path $installRoot "launcher.vbs")
+foreach ($supportFile in @('MediaCatalog.ps1','PlaybackSurface.ps1','PlaybackController.ps1','UpdateClient.ps1','UpdateUi.ps1','UpdateWorker.ps1','launcher.vbs')) {
+    Copy-IfExists -SourcePath (Join-Path $sourceRoot ('src\' + $supportFile)) -DestinationPath (Join-Path $installRoot $supportFile)
+    Copy-IfExists -SourcePath (Join-Path $sourceRoot ('dist\' + $supportFile)) -DestinationPath (Join-Path $installRoot $supportFile)
+}
+if (Test-Path -LiteralPath (Join-Path $sourceRoot 'dist\docs')) {
+    Copy-Item -LiteralPath (Join-Path $sourceRoot 'dist\docs') -Destination $installRoot -Recurse -Force
+}
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "README.md") -DestinationPath (Join-Path $installRoot "README.md")
+foreach ($assetSource in @('src\assets','dist\assets')) {
+    if (Test-Path -LiteralPath (Join-Path $sourceRoot $assetSource)) { Copy-Item -LiteralPath (Join-Path $sourceRoot $assetSource) -Destination $installRoot -Recurse -Force }
+}
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "uninstall.ps1") -DestinationPath (Join-Path $installRoot "uninstall.ps1")
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "logoapp.png.jpg") -DestinationPath (Join-Path $installRoot "logoapp.png.jpg")
 Copy-IfExists -SourcePath (Join-Path $sourceRoot "logoapp.ico") -DestinationPath (Join-Path $installRoot "logoapp.ico")
-foreach ($binary in @("MarcaVecioStream.exe", "WebServer.exe", "TelegramWorker.exe")) {
+foreach ($binary in @("MarcaVecioStream.exe", "WebServer.exe", "TelegramWorker.exe", "UpdateWorker.exe")) {
     $binarySource = Join-Path $sourceRoot ("dist\" + $binary)
     Copy-IfExists -SourcePath $binarySource -DestinationPath (Join-Path $installRoot $binary)
 }
