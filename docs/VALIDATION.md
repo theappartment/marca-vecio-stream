@@ -42,3 +42,5 @@ I test isolano configurazioni e cartelle di prova. Il test playback usa una fine
 Versione 1.2.7: verificati recupero della dissolvenza e nove combinazioni foto/video/reel nella versione compilata. La verifica visiva dell'assenza di animazioni di apertura deve essere completata sullo schermo reale: la sessione di test non dispone del desktop interattivo. DWM: https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute
 
 Versione 1.3.0: test ricerca solo manuale (avvio e timer inattivo senza richieste), confronto versioni, release incomplete, SHA256, download interrotto, sostituzione atomica e controlli WPF superati. DPAPI non disponibile nell'account non interattivo di questa sessione: verifica accesso cifrato e consenso UAC da completare sul desktop dell'utente.
+
+Versione 1.3.1: updater rimosso completamente; nuova prova con Defender sul PC dell'utente necessaria. Non sono state modificate le protezioni antivirus.

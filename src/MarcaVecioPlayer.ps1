@@ -51,8 +51,6 @@ $script:ApplicationClosing = $false
 . (Join-Path $AppRoot 'MediaCatalog.ps1')
 . (Join-Path $AppRoot 'PlaybackSurface.ps1')
 . (Join-Path $AppRoot 'PlaybackController.ps1')
-. (Join-Path $AppRoot 'UpdateClient.ps1')
-. (Join-Path $AppRoot 'UpdateUi.ps1')
 $script:ConfigWriteStamp = ""
 $script:WebServerOwnedPid = $null
 $script:TelegramWorkerOwnedPid = $null
@@ -1005,20 +1003,7 @@ function Process-CommandQueue {
                         </StackPanel>
                     </Border>
 
-                    <Border Background="#F8FAFC" CornerRadius="12" Padding="14" Margin="0,0,0,12">
-                        <StackPanel>
-                            <TextBlock Text="Aggiornamenti app" FontSize="18" FontWeight="Bold" Margin="0,0,0,8" />
-                            <TextBlock x:Name="AppVersionText" Margin="0,0,0,10" />
-                            <Button x:Name="CheckUpdatesButton" Content="Cerca aggiornamenti" Height="34" Margin="0,0,0,8" />
-                            <Button x:Name="InstallUpdateButton" Content="Scarica e installa" IsEnabled="False" Height="34" Margin="0,0,0,8" />
-                            <TextBlock x:Name="UpdateStatusText" TextWrapping="Wrap" Margin="0,0,0,10" />
-                            <TextBlock Text="Token GitHub (solo questo repository, Contents: lettura)" TextWrapping="Wrap" />
-                            <PasswordBox x:Name="GithubTokenPasswordBox" Height="32" Margin="0,6,0,8" />
-                            <Button x:Name="SaveGithubTokenButton" Content="Salva accesso (vuoto per rimuoverlo)" Height="34" Margin="0,0,0,8" />
-                            <Button x:Name="OpenReleasesButton" Content="Release e versioni precedenti" Height="34" />
-                            <TextBlock Text="L'installazione chiude app e playback. Foto, video e impostazioni vengono conservati." TextWrapping="Wrap" Margin="0,10,0,0" Foreground="#52667A" />
-                        </StackPanel>
-                    </Border>
+
 
                     <Border Background="#F8FAFC" CornerRadius="12" Padding="14" Margin="0,0,0,12">
                         <StackPanel>
@@ -1231,7 +1216,6 @@ $telegramTokenPasswordBox = $window.FindName("TelegramTokenPasswordBox")
 $statusText = $window.FindName("StatusText")
 
 try {
-    Initialize-AppUpdater
     $config = Load-Config
     Apply-ConfigToUi -Config $config
     Configure-LaunchOnLogin -Enabled $config.launchOnLogin
@@ -1465,8 +1449,6 @@ try {
 
     $window.Add_Closing({
     $script:ApplicationClosing = $true
-    $script:UpdaterTimer.Stop()
-    Stop-AppUpdateJob
     $syncTimer.Stop()
     $playbackTimer.Stop()
     Stop-Playback

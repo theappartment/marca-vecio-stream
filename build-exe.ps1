@@ -11,9 +11,9 @@ New-Item -ItemType Directory -Path $compileRoot -Force | Out-Null
 
 # Inline support modules in EXEs so Restricted execution policy does not prevent
 # dot-sourcing at runtime. Source-script installs still use the shared modules.
-foreach ($entryPoint in @('MarcaVecioPlayer.ps1','WebServer.ps1','UpdateWorker.ps1')) {
+foreach ($entryPoint in @('MarcaVecioPlayer.ps1','WebServer.ps1')) {
     $source = [IO.File]::ReadAllText((Join-Path $projectRoot ('src\' + $entryPoint)))
-    foreach ($moduleName in @('MediaCatalog.ps1','PlaybackSurface.ps1','PlaybackController.ps1','UpdateClient.ps1','UpdateUi.ps1')) {
+    foreach ($moduleName in @('MediaCatalog.ps1','PlaybackSurface.ps1','PlaybackController.ps1')) {
         $marker = ". (Join-Path `$AppRoot '$moduleName')"
         if ($source.Contains($marker)) {
             $source = $source.Replace($marker, [IO.File]::ReadAllText((Join-Path $projectRoot ('src\' + $moduleName))))
@@ -47,7 +47,7 @@ $meta = @{
     company     = "The Appartment"
     product     = "Marca Vecio Stream"
     copyright   = "The Appartment"
-    version     = "1.3.0.0"
+    version     = "1.3.1.0"
 }
 
 Invoke-ps2exe -inputFile (Join-Path $compileRoot "MarcaVecioPlayer.ps1") `
@@ -68,12 +68,8 @@ Invoke-ps2exe -inputFile (Join-Path $projectRoot "src\TelegramWorker.ps1") `
     -noConsole -STA -x64 `
     -title "Marca Vecio Stream Telegram Worker" -description $meta.description -company $meta.company -product $meta.product -copyright $meta.copyright -version $meta.version
 
-Invoke-ps2exe -inputFile (Join-Path $compileRoot "UpdateWorker.ps1") `
-    -outputFile (Join-Path $distRoot "UpdateWorker.exe") -noConsole -STA -x64 `
-    -title "Marca Vecio Stream Updater" -description $meta.description -company $meta.company -product $meta.product -copyright $meta.copyright -version $meta.version
-
 Copy-Item -LiteralPath (Join-Path $projectRoot "src\web\index.html") -Destination (Join-Path $webDistRoot "index.html") -Force
-foreach ($supportFile in @('MediaCatalog.ps1','PlaybackSurface.ps1','PlaybackController.ps1','UpdateClient.ps1','UpdateUi.ps1','launcher.vbs')) {
+foreach ($supportFile in @('MediaCatalog.ps1','PlaybackSurface.ps1','PlaybackController.ps1','launcher.vbs')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot ('src\' + $supportFile)) -Destination (Join-Path $distRoot $supportFile) -Force
 }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $distRoot -Recurse -Force

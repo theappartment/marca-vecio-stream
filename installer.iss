@@ -1,5 +1,5 @@
 #define MyAppName "Marca Vecio Stream"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "The Appartment"
 #define MyAppExeName "MarcaVecioStream.exe"
 #define MyAppSourceDir "dist"
@@ -37,9 +37,6 @@ Source: "dist\TelegramWorker.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\MediaCatalog.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\PlaybackController.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\PlaybackSurface.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\UpdateWorker.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\UpdateClient.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\UpdateUi.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\launcher.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "dist\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -49,6 +46,12 @@ Source: "dist\logoapp.png.jpg"; DestDir: "{app}"; Flags: ignoreversion
 Source: "dist\web\index.html"; DestDir: "{app}\web"; Flags: ignoreversion
 Source: "dist\tools\ngrok\ngrok.exe"; DestDir: "{app}\tools\ngrok"; Flags: ignoreversion
 Source: "uninstall.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+Type: files; Name: "{app}\UpdateWorker.exe"
+Type: files; Name: "{app}\UpdateWorker.ps1"
+Type: files; Name: "{app}\UpdateClient.ps1"
+Type: files; Name: "{app}\UpdateUi.ps1"
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\logoapp.ico"
